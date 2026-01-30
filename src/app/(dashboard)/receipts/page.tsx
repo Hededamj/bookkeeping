@@ -13,7 +13,21 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { formatCurrency, formatDate } from '@/lib/utils'
-import { Upload, Camera, Search, Image as ImageIcon, Loader2, X, FileText, Trash2, AlertCircle, CheckCircle2, Clock, RefreshCw } from 'lucide-react'
+import { Upload, Camera, Search, Image as ImageIcon, Loader2, X, FileText, Trash2, AlertCircle, CheckCircle2, Clock, RefreshCw, Save, Sparkles } from 'lucide-react'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import { Label } from '@/components/ui/label'
+
+type Vendor = {
+  id: string
+  name: string
+  patterns: string[]
+}
 
 // Helper to check if URL is a PDF
 const isPdf = (url: string, fileName: string | null): boolean => {
@@ -58,17 +72,46 @@ type Receipt = {
 
 export default function ReceiptsPage() {
   const [receipts, setReceipts] = useState<Receipt[]>([])
+  const [vendors, setVendors] = useState<Vendor[]>([])
   const [loading, setLoading] = useState(true)
   const [uploading, setUploading] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [retrying, setRetrying] = useState(false)
+  const [saving, setSaving] = useState(false)
   const [search, setSearch] = useState('')
   const [selectedReceipt, setSelectedReceipt] = useState<Receipt | null>(null)
   const [dragActive, setDragActive] = useState(false)
 
+  // Editable fields for selected receipt
+  const [editVendor, setEditVendor] = useState<string>('')
+  const [editAmount, setEditAmount] = useState<string>('')
+  const [editDate, setEditDate] = useState<string>('')
+  const [newVendorName, setNewVendorName] = useState<string>('')
+
   useEffect(() => {
     fetchReceipts()
+    fetchVendors()
   }, [])
+
+  // Update edit fields when a receipt is selected
+  useEffect(() => {
+    if (selectedReceipt) {
+      setEditVendor(selectedReceipt.ocrVendor || '')
+      setEditAmount(selectedReceipt.ocrAmount || '')
+      setEditDate(selectedReceipt.ocrDate ? selectedReceipt.ocrDate.split('T')[0] : '')
+      setNewVendorName('')
+    }
+  }, [selectedReceipt])
+
+  const fetchVendors = async () => {
+    try {
+      const res = await fetch('/api/vendors')
+      const data = await res.json()
+      setVendors(data)
+    } catch (error) {
+      console.error('Failed to fetch vendors:', error)
+    }
+  }
 
   const retryOcr = async (id: string) => {
     setRetrying(true)
@@ -89,6 +132,52 @@ export default function ReceiptsPage() {
       console.error('Retry OCR error:', error)
     } finally {
       setRetrying(false)
+    }
+  }
+
+  const saveReceiptChanges = async () => {
+    if (!selectedReceipt) return
+
+    setSaving(true)
+    try {
+      const res = await fetch(`/api/receipts/${selectedReceipt.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ocrVendor: editVendor || null,
+          ocrAmount: editAmount ? parseFloat(editAmount) : null,
+          ocrDate: editDate || null,
+          newVendorName: newVendorName || null,
+          learnPatterns: true, // Tell the API to learn from this correction
+        }),
+      })
+
+      if (res.ok) {
+        const data = await res.json()
+        setSelectedReceipt(data.receipt)
+        fetchReceipts()
+        fetchVendors() // Refresh vendors in case new one was created
+        if (data.patternsLearned) {
+          alert(`Systemet har lært ${data.patternsLearned} nye mønstre for "${editVendor || newVendorName}"`)
+        }
+      }
+    } catch (error) {
+      console.error('Save error:', error)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const selectVendorFromList = (vendorId: string) => {
+    if (vendorId === 'new') {
+      setEditVendor('')
+      setNewVendorName('')
+    } else {
+      const vendor = vendors.find(v => v.id === vendorId)
+      if (vendor) {
+        setEditVendor(vendor.name)
+        setNewVendorName('')
+      }
     }
   }
 
@@ -396,28 +485,80 @@ export default function ReceiptsPage() {
                 )}
               </div>
               <div className="space-y-4">
-                <div>
-                  <p className="text-sm text-muted-foreground">Leverandør</p>
-                  <p className="font-medium">
-                    {selectedReceipt.ocrVendor || 'Ikke genkendt'}
+                {/* Vendor selection */}
+                <div className="space-y-2">
+                  <Label>Leverandør</Label>
+                  <Select
+                    value={vendors.find(v => v.name === editVendor)?.id || (editVendor ? 'custom' : 'new')}
+                    onValueChange={(v) => {
+                      if (v === 'new') {
+                        setEditVendor('')
+                        setNewVendorName('')
+                      } else if (v === 'custom') {
+                        // Keep current custom value
+                      } else {
+                        selectVendorFromList(v)
+                      }
+                    }}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Vælg leverandør" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="new">+ Opret ny leverandør</SelectItem>
+                      {editVendor && !vendors.find(v => v.name === editVendor) && (
+                        <SelectItem value="custom">{editVendor} (fra OCR)</SelectItem>
+                      )}
+                      {vendors.map((vendor) => (
+                        <SelectItem key={vendor.id} value={vendor.id}>
+                          {vendor.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {(editVendor === '' || !vendors.find(v => v.name === editVendor)) && (
+                    <Input
+                      placeholder="Indtast leverandørnavn..."
+                      value={newVendorName || editVendor}
+                      onChange={(e) => {
+                        setNewVendorName(e.target.value)
+                        setEditVendor(e.target.value)
+                      }}
+                    />
+                  )}
+                  <p className="text-xs text-muted-foreground flex items-center gap-1">
+                    <Sparkles className="h-3 w-3" />
+                    Vælg leverandør for at lære systemet mønstre fra denne faktura
                   </p>
                 </div>
-                <div>
-                  <p className="text-sm text-muted-foreground">Beløb</p>
-                  <p className="text-xl font-bold">
-                    {selectedReceipt.ocrAmount
-                      ? formatCurrency(parseFloat(selectedReceipt.ocrAmount))
-                      : 'Ikke genkendt'}
-                  </p>
+
+                {/* Amount */}
+                <div className="space-y-2">
+                  <Label>Beløb (DKK)</Label>
+                  <Input
+                    type="number"
+                    step="0.01"
+                    placeholder="0.00"
+                    value={editAmount}
+                    onChange={(e) => setEditAmount(e.target.value)}
+                  />
                 </div>
-                <div>
-                  <p className="text-sm text-muted-foreground">Dato</p>
-                  <p className="font-medium">
-                    {selectedReceipt.ocrDate
-                      ? formatDate(selectedReceipt.ocrDate)
-                      : 'Ikke genkendt'}
-                  </p>
+
+                {/* Date */}
+                <div className="space-y-2">
+                  <Label>Dato</Label>
+                  <Input
+                    type="date"
+                    value={editDate}
+                    onChange={(e) => setEditDate(e.target.value)}
+                  />
                 </div>
+
+                {/* Save button */}
+                <Button onClick={saveReceiptChanges} disabled={saving} className="w-full">
+                  <Save className="mr-2 h-4 w-4" />
+                  {saving ? 'Gemmer...' : 'Gem ændringer og lær mønstre'}
+                </Button>
                 {selectedReceipt.ocrText && (
                   <div>
                     <p className="text-sm text-muted-foreground">OCR tekst</p>
