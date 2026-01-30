@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
 import {
   Select,
   SelectContent,
@@ -11,14 +12,27 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Separator } from '@/components/ui/separator'
 import { formatCurrency } from '@/lib/utils'
-import { Download, TrendingUp, TrendingDown, Minus } from 'lucide-react'
+import {
+  Download,
+  TrendingUp,
+  TrendingDown,
+  Minus,
+  Calendar,
+  FileText,
+  CheckCircle2,
+  Clock,
+  AlertCircle
+} from 'lucide-react'
 
 type ReportData = {
   period: string
   income: number
   expenses: number
   profit: number
+  transactionCount: number
+  unmatchedCount: number
   byCategory: {
     categoryId: string
     categoryName: string
@@ -27,28 +41,80 @@ type ReportData = {
   }[]
 }
 
+type YearSummary = {
+  year: number
+  income: number
+  expenses: number
+  profit: number
+  transactionCount: number
+  unmatchedCount: number
+  status: 'complete' | 'in-progress' | 'future'
+}
+
 const months = [
   'Januar', 'Februar', 'Marts', 'April', 'Maj', 'Juni',
   'Juli', 'August', 'September', 'Oktober', 'November', 'December'
 ]
 
 export default function ReportsPage() {
-  const [year, setYear] = useState(new Date().getFullYear().toString())
+  const currentYear = new Date().getFullYear()
+  const [selectedYear, setSelectedYear] = useState(currentYear.toString())
   const [month, setMonth] = useState((new Date().getMonth() + 1).toString())
   const [reportData, setReportData] = useState<ReportData | null>(null)
   const [yearlyData, setYearlyData] = useState<ReportData | null>(null)
+  const [yearSummaries, setYearSummaries] = useState<YearSummary[]>([])
   const [loading, setLoading] = useState(true)
+  const [activeTab, setActiveTab] = useState('annual')
+
+  // Years we're tracking: 2025, 2026, and preparing for 2027
+  const trackingYears = [2025, 2026, 2027]
+
+  useEffect(() => {
+    fetchYearSummaries()
+  }, [])
 
   useEffect(() => {
     fetchReport()
-  }, [year, month])
+  }, [selectedYear, month])
+
+  const fetchYearSummaries = async () => {
+    try {
+      const summaries: YearSummary[] = []
+
+      for (const year of trackingYears) {
+        const res = await fetch(`/api/reports?year=${year}`)
+        const data = await res.json()
+
+        let status: 'complete' | 'in-progress' | 'future' = 'future'
+        if (year < currentYear) {
+          status = data.unmatchedCount === 0 ? 'complete' : 'in-progress'
+        } else if (year === currentYear) {
+          status = 'in-progress'
+        }
+
+        summaries.push({
+          year,
+          income: data.income || 0,
+          expenses: data.expenses || 0,
+          profit: data.profit || 0,
+          transactionCount: data.transactionCount || 0,
+          unmatchedCount: data.unmatchedCount || 0,
+          status,
+        })
+      }
+
+      setYearSummaries(summaries)
+    } catch (error) {
+      console.error('Failed to fetch year summaries:', error)
+    }
+  }
 
   const fetchReport = async () => {
     setLoading(true)
     try {
       const [monthlyRes, yearlyRes] = await Promise.all([
-        fetch(`/api/reports?year=${year}&month=${month}`),
-        fetch(`/api/reports?year=${year}`),
+        fetch(`/api/reports?year=${selectedYear}&month=${month}`),
+        fetch(`/api/reports?year=${selectedYear}`),
       ])
       const monthlyData = await monthlyRes.json()
       const yearlyDataResponse = await yearlyRes.json()
@@ -61,20 +127,32 @@ export default function ReportsPage() {
     }
   }
 
-  const exportCSV = () => {
-    if (!reportData) return
+  const exportAnnualCSV = (year: string) => {
+    const data = year === selectedYear ? yearlyData : null
+    if (!data) return
 
     const rows = [
-      ['Kategori', 'Type', 'Beløb'],
-      ...reportData.byCategory.map((c) => [
-        c.categoryName,
-        c.type === 'INCOME' ? 'Indtægt' : 'Udgift',
-        c.total.toString(),
-      ]),
+      [`ÅRSREGNSKAB ${year}`],
+      [`Periode: 1. januar - 31. december ${year}`],
       [],
-      ['', 'Total indtægter', reportData.income.toString()],
-      ['', 'Total udgifter', reportData.expenses.toString()],
-      ['', 'Resultat', reportData.profit.toString()],
+      ['RESULTATOPGØRELSE'],
+      [],
+      ['INDTÆGTER'],
+      ['Kategori', 'Beløb (DKK)'],
+      ...data.byCategory
+        .filter((c) => c.type === 'INCOME')
+        .map((c) => [c.categoryName, c.total.toFixed(2)]),
+      ['Total indtægter', data.income.toFixed(2)],
+      [],
+      ['UDGIFTER'],
+      ['Kategori', 'Beløb (DKK)'],
+      ...data.byCategory
+        .filter((c) => c.type === 'EXPENSE')
+        .map((c) => [c.categoryName, Math.abs(c.total).toFixed(2)]),
+      ['Total udgifter', data.expenses.toFixed(2)],
+      [],
+      ['RESULTAT'],
+      ['Resultat før skat', data.profit.toFixed(2)],
     ]
 
     const csv = rows.map((r) => r.join(';')).join('\n')
@@ -82,62 +160,287 @@ export default function ReportsPage() {
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `rapport-${year}-${month.padStart(2, '0')}.csv`
+    a.download = `aarsregnskab-${year}.csv`
     a.click()
   }
 
-  const years = Array.from(
-    { length: 5 },
-    (_, i) => (new Date().getFullYear() - i).toString()
-  )
+  const getStatusBadge = (status: YearSummary['status']) => {
+    switch (status) {
+      case 'complete':
+        return (
+          <Badge variant="default" className="bg-green-500">
+            <CheckCircle2 className="mr-1 h-3 w-3" />
+            Afsluttet
+          </Badge>
+        )
+      case 'in-progress':
+        return (
+          <Badge variant="secondary" className="bg-yellow-100 text-yellow-800">
+            <Clock className="mr-1 h-3 w-3" />
+            I gang
+          </Badge>
+        )
+      case 'future':
+        return (
+          <Badge variant="outline">
+            <Calendar className="mr-1 h-3 w-3" />
+            Kommende
+          </Badge>
+        )
+    }
+  }
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-3xl font-bold">Rapporter</h1>
-          <p className="text-muted-foreground">Resultatopgørelse og oversigt</p>
-        </div>
-        <div className="flex gap-2">
-          <Select value={month} onValueChange={setMonth}>
-            <SelectTrigger className="w-[140px]">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {months.map((m, i) => (
-                <SelectItem key={i} value={(i + 1).toString()}>
-                  {m}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Select value={year} onValueChange={setYear}>
-            <SelectTrigger className="w-[100px]">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {years.map((y) => (
-                <SelectItem key={y} value={y}>
-                  {y}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Button variant="outline" onClick={exportCSV} disabled={!reportData}>
-            <Download className="mr-2 h-4 w-4" />
-            Eksporter
-          </Button>
-        </div>
+      <div>
+        <h1 className="text-3xl font-bold">Årsregnskaber</h1>
+        <p className="text-muted-foreground">
+          Regnskabsperiode: 1. januar - 31. december
+        </p>
       </div>
 
-      {loading ? (
-        <div className="flex h-64 items-center justify-center">
-          <p className="text-muted-foreground">Indlæser...</p>
+      {/* Year Overview Cards */}
+      <div className="grid gap-4 md:grid-cols-3">
+        {yearSummaries.map((summary) => (
+          <Card
+            key={summary.year}
+            className={`cursor-pointer transition-all hover:shadow-md ${
+              selectedYear === summary.year.toString() ? 'ring-2 ring-primary' : ''
+            }`}
+            onClick={() => {
+              setSelectedYear(summary.year.toString())
+              setActiveTab('annual')
+            }}
+          >
+            <CardHeader className="pb-2">
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-2xl">{summary.year}</CardTitle>
+                {getStatusBadge(summary.status)}
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-2">
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted-foreground">Indtægter</span>
+                  <span className="font-medium text-green-600">
+                    {formatCurrency(summary.income)}
+                  </span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted-foreground">Udgifter</span>
+                  <span className="font-medium text-red-600">
+                    {formatCurrency(summary.expenses)}
+                  </span>
+                </div>
+                <Separator />
+                <div className="flex justify-between font-semibold">
+                  <span>Resultat</span>
+                  <span className={summary.profit >= 0 ? 'text-green-600' : 'text-red-600'}>
+                    {formatCurrency(summary.profit)}
+                  </span>
+                </div>
+                {summary.unmatchedCount > 0 && (
+                  <div className="flex items-center gap-1 text-xs text-yellow-600">
+                    <AlertCircle className="h-3 w-3" />
+                    {summary.unmatchedCount} transaktioner mangler bilag
+                  </div>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+
+      <Tabs value={activeTab} onValueChange={setActiveTab}>
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <TabsList>
+            <TabsTrigger value="annual">
+              <FileText className="mr-2 h-4 w-4" />
+              Årsregnskab {selectedYear}
+            </TabsTrigger>
+            <TabsTrigger value="monthly">
+              <Calendar className="mr-2 h-4 w-4" />
+              Månedlig
+            </TabsTrigger>
+          </TabsList>
+
+          <div className="flex gap-2">
+            {activeTab === 'monthly' && (
+              <Select value={month} onValueChange={setMonth}>
+                <SelectTrigger className="w-[140px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {months.map((m, i) => (
+                    <SelectItem key={i} value={(i + 1).toString()}>
+                      {m}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+            <Select value={selectedYear} onValueChange={setSelectedYear}>
+              <SelectTrigger className="w-[100px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {trackingYears.map((y) => (
+                  <SelectItem key={y} value={y.toString()}>
+                    {y}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Button
+              variant="outline"
+              onClick={() => exportAnnualCSV(selectedYear)}
+              disabled={!yearlyData}
+            >
+              <Download className="mr-2 h-4 w-4" />
+              Eksporter
+            </Button>
+          </div>
         </div>
-      ) : (
-        <>
-          {/* Summary cards */}
-          <div className="grid gap-4 md:grid-cols-3">
+
+        <TabsContent value="annual" className="space-y-4">
+          {loading ? (
+            <div className="flex h-64 items-center justify-center">
+              <p className="text-muted-foreground">Indlæser...</p>
+            </div>
+          ) : (
+            <Card>
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle>Resultatopgørelse {selectedYear}</CardTitle>
+                    <CardDescription>
+                      Regnskabsperiode: 1. januar - 31. december {selectedYear}
+                    </CardDescription>
+                  </div>
+                  {yearlyData && yearlyData.transactionCount > 0 && (
+                    <Badge variant="outline">
+                      {yearlyData.transactionCount} posteringer
+                    </Badge>
+                  )}
+                </div>
+              </CardHeader>
+              <CardContent>
+                {yearlyData && (yearlyData.income > 0 || yearlyData.expenses > 0) ? (
+                  <div className="space-y-6">
+                    {/* Income section */}
+                    <div>
+                      <div className="mb-3 flex items-center gap-2">
+                        <TrendingUp className="h-5 w-5 text-green-500" />
+                        <h3 className="font-semibold text-green-600">Indtægter</h3>
+                      </div>
+                      <div className="space-y-2">
+                        {yearlyData.byCategory
+                          .filter((c) => c.type === 'INCOME')
+                          .map((c) => (
+                            <div
+                              key={c.categoryId}
+                              className="flex items-center justify-between rounded-lg border p-3"
+                            >
+                              <span>{c.categoryName}</span>
+                              <span className="font-medium text-green-600">
+                                {formatCurrency(c.total)}
+                              </span>
+                            </div>
+                          ))}
+                        {yearlyData.byCategory.filter((c) => c.type === 'INCOME').length === 0 && (
+                          <p className="text-sm text-muted-foreground">
+                            Ingen kategoriserede indtægter
+                          </p>
+                        )}
+                        <div className="flex items-center justify-between border-t pt-2 font-semibold">
+                          <span>Total indtægter</span>
+                          <span className="text-green-600">
+                            {formatCurrency(yearlyData.income)}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Expenses section */}
+                    <div>
+                      <div className="mb-3 flex items-center gap-2">
+                        <TrendingDown className="h-5 w-5 text-red-500" />
+                        <h3 className="font-semibold text-red-600">Udgifter</h3>
+                      </div>
+                      <div className="space-y-2">
+                        {yearlyData.byCategory
+                          .filter((c) => c.type === 'EXPENSE')
+                          .map((c) => (
+                            <div
+                              key={c.categoryId}
+                              className="flex items-center justify-between rounded-lg border p-3"
+                            >
+                              <span>{c.categoryName}</span>
+                              <span className="font-medium text-red-600">
+                                {formatCurrency(Math.abs(c.total))}
+                              </span>
+                            </div>
+                          ))}
+                        {yearlyData.byCategory.filter((c) => c.type === 'EXPENSE').length === 0 && (
+                          <p className="text-sm text-muted-foreground">
+                            Ingen kategoriserede udgifter
+                          </p>
+                        )}
+                        <div className="flex items-center justify-between border-t pt-2 font-semibold">
+                          <span>Total udgifter</span>
+                          <span className="text-red-600">
+                            {formatCurrency(yearlyData.expenses)}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Result */}
+                    <div className="rounded-lg bg-muted p-4">
+                      <div className="flex items-center justify-between text-lg font-bold">
+                        <span>Resultat før skat</span>
+                        <span
+                          className={yearlyData.profit >= 0 ? 'text-green-600' : 'text-red-600'}
+                        >
+                          {formatCurrency(yearlyData.profit)}
+                        </span>
+                      </div>
+                      <p className="mt-1 text-sm text-muted-foreground">
+                        Til brug ved skatteindberetning
+                      </p>
+                    </div>
+
+                    {/* Warnings */}
+                    {yearlyData.unmatchedCount > 0 && (
+                      <div className="flex items-start gap-2 rounded-lg border border-yellow-200 bg-yellow-50 p-4 text-yellow-800">
+                        <AlertCircle className="mt-0.5 h-5 w-5 flex-shrink-0" />
+                        <div>
+                          <p className="font-medium">Ufuldstændigt regnskab</p>
+                          <p className="text-sm">
+                            {yearlyData.unmatchedCount} transaktioner mangler bilag.
+                            Gå til Afstemning for at matche dem.
+                          </p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="flex h-32 flex-col items-center justify-center gap-2">
+                    <Minus className="h-10 w-10 text-muted-foreground" />
+                    <p className="text-muted-foreground">Ingen data for {selectedYear}</p>
+                    <p className="text-sm text-muted-foreground">
+                      Importer transaktioner fra Stripe eller bank CSV
+                    </p>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          )}
+        </TabsContent>
+
+        <TabsContent value="monthly">
+          {/* Summary cards for selected month */}
+          <div className="mb-4 grid gap-4 md:grid-cols-3">
             <Card>
               <CardHeader className="flex flex-row items-center justify-between pb-2">
                 <CardTitle className="text-sm font-medium text-muted-foreground">
@@ -150,7 +453,7 @@ export default function ReportsPage() {
                   {formatCurrency(reportData?.income || 0)}
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  {months[parseInt(month) - 1]} {year}
+                  {months[parseInt(month) - 1]} {selectedYear}
                 </p>
               </CardContent>
             </Card>
@@ -167,7 +470,7 @@ export default function ReportsPage() {
                   {formatCurrency(reportData?.expenses || 0)}
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  {months[parseInt(month) - 1]} {year}
+                  {months[parseInt(month) - 1]} {selectedYear}
                 </p>
               </CardContent>
             </Card>
@@ -192,160 +495,100 @@ export default function ReportsPage() {
                   {formatCurrency(reportData?.profit || 0)}
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  {months[parseInt(month) - 1]} {year}
+                  {months[parseInt(month) - 1]} {selectedYear}
                 </p>
               </CardContent>
             </Card>
           </div>
 
-          <Tabs defaultValue="monthly">
-            <TabsList>
-              <TabsTrigger value="monthly">Månedlig</TabsTrigger>
-              <TabsTrigger value="yearly">Årlig ({year})</TabsTrigger>
-            </TabsList>
-
-            <TabsContent value="monthly">
-              <Card>
-                <CardHeader>
-                  <CardTitle>Resultatopgørelse</CardTitle>
-                  <CardDescription>
-                    {months[parseInt(month) - 1]} {year}
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  {reportData && reportData.byCategory.length > 0 ? (
-                    <div className="space-y-6">
-                      {/* Income section */}
-                      <div>
-                        <h3 className="mb-3 font-semibold text-green-600">Indtægter</h3>
-                        <div className="space-y-2">
-                          {reportData.byCategory
-                            .filter((c) => c.type === 'INCOME')
-                            .map((c) => (
-                              <div
-                                key={c.categoryId}
-                                className="flex items-center justify-between rounded-lg border p-3"
-                              >
-                                <span>{c.categoryName}</span>
-                                <span className="font-medium text-green-600">
-                                  {formatCurrency(c.total)}
-                                </span>
-                              </div>
-                            ))}
-                          {reportData.byCategory.filter((c) => c.type === 'INCOME')
-                            .length === 0 && (
-                            <p className="text-sm text-muted-foreground">
-                              Ingen kategoriserede indtægter
-                            </p>
-                          )}
-                          <div className="flex items-center justify-between border-t pt-2 font-semibold">
-                            <span>Total indtægter</span>
-                            <span className="text-green-600">
-                              {formatCurrency(reportData.income)}
+          <Card>
+            <CardHeader>
+              <CardTitle>Månedlig resultatopgørelse</CardTitle>
+              <CardDescription>
+                {months[parseInt(month) - 1]} {selectedYear}
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {loading ? (
+                <div className="flex h-32 items-center justify-center">
+                  <p className="text-muted-foreground">Indlæser...</p>
+                </div>
+              ) : reportData && reportData.byCategory.length > 0 ? (
+                <div className="space-y-6">
+                  {/* Income section */}
+                  <div>
+                    <h3 className="mb-3 font-semibold text-green-600">Indtægter</h3>
+                    <div className="space-y-2">
+                      {reportData.byCategory
+                        .filter((c) => c.type === 'INCOME')
+                        .map((c) => (
+                          <div
+                            key={c.categoryId}
+                            className="flex items-center justify-between rounded-lg border p-3"
+                          >
+                            <span>{c.categoryName}</span>
+                            <span className="font-medium text-green-600">
+                              {formatCurrency(c.total)}
                             </span>
                           </div>
-                        </div>
+                        ))}
+                      <div className="flex items-center justify-between border-t pt-2 font-semibold">
+                        <span>Total</span>
+                        <span className="text-green-600">
+                          {formatCurrency(reportData.income)}
+                        </span>
                       </div>
+                    </div>
+                  </div>
 
-                      {/* Expenses section */}
-                      <div>
-                        <h3 className="mb-3 font-semibold text-red-600">Udgifter</h3>
-                        <div className="space-y-2">
-                          {reportData.byCategory
-                            .filter((c) => c.type === 'EXPENSE')
-                            .map((c) => (
-                              <div
-                                key={c.categoryId}
-                                className="flex items-center justify-between rounded-lg border p-3"
-                              >
-                                <span>{c.categoryName}</span>
-                                <span className="font-medium text-red-600">
-                                  {formatCurrency(Math.abs(c.total))}
-                                </span>
-                              </div>
-                            ))}
-                          {reportData.byCategory.filter((c) => c.type === 'EXPENSE')
-                            .length === 0 && (
-                            <p className="text-sm text-muted-foreground">
-                              Ingen kategoriserede udgifter
-                            </p>
-                          )}
-                          <div className="flex items-center justify-between border-t pt-2 font-semibold">
-                            <span>Total udgifter</span>
-                            <span className="text-red-600">
-                              {formatCurrency(reportData.expenses)}
+                  {/* Expenses section */}
+                  <div>
+                    <h3 className="mb-3 font-semibold text-red-600">Udgifter</h3>
+                    <div className="space-y-2">
+                      {reportData.byCategory
+                        .filter((c) => c.type === 'EXPENSE')
+                        .map((c) => (
+                          <div
+                            key={c.categoryId}
+                            className="flex items-center justify-between rounded-lg border p-3"
+                          >
+                            <span>{c.categoryName}</span>
+                            <span className="font-medium text-red-600">
+                              {formatCurrency(Math.abs(c.total))}
                             </span>
                           </div>
-                        </div>
+                        ))}
+                      <div className="flex items-center justify-between border-t pt-2 font-semibold">
+                        <span>Total</span>
+                        <span className="text-red-600">
+                          {formatCurrency(reportData.expenses)}
+                        </span>
                       </div>
+                    </div>
+                  </div>
 
-                      {/* Result */}
-                      <div className="rounded-lg bg-muted p-4">
-                        <div className="flex items-center justify-between text-lg font-bold">
-                          <span>Resultat før skat</span>
-                          <span
-                            className={
-                              reportData.profit >= 0 ? 'text-green-600' : 'text-red-600'
-                            }
-                          >
-                            {formatCurrency(reportData.profit)}
-                          </span>
-                        </div>
-                      </div>
+                  {/* Result */}
+                  <div className="rounded-lg bg-muted p-4">
+                    <div className="flex items-center justify-between text-lg font-bold">
+                      <span>Månedens resultat</span>
+                      <span
+                        className={reportData.profit >= 0 ? 'text-green-600' : 'text-red-600'}
+                      >
+                        {formatCurrency(reportData.profit)}
+                      </span>
                     </div>
-                  ) : (
-                    <div className="flex h-32 flex-col items-center justify-center gap-2">
-                      <Minus className="h-10 w-10 text-muted-foreground" />
-                      <p className="text-muted-foreground">Ingen data for denne periode</p>
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-            </TabsContent>
-
-            <TabsContent value="yearly">
-              <Card>
-                <CardHeader>
-                  <CardTitle>Årsoversigt</CardTitle>
-                  <CardDescription>{year}</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  {yearlyData ? (
-                    <div className="space-y-4">
-                      <div className="grid gap-4 md:grid-cols-3">
-                        <div className="rounded-lg border p-4">
-                          <p className="text-sm text-muted-foreground">Årlige indtægter</p>
-                          <p className="text-xl font-bold text-green-600">
-                            {formatCurrency(yearlyData.income)}
-                          </p>
-                        </div>
-                        <div className="rounded-lg border p-4">
-                          <p className="text-sm text-muted-foreground">Årlige udgifter</p>
-                          <p className="text-xl font-bold text-red-600">
-                            {formatCurrency(yearlyData.expenses)}
-                          </p>
-                        </div>
-                        <div className="rounded-lg border p-4">
-                          <p className="text-sm text-muted-foreground">Årets resultat</p>
-                          <p
-                            className={`text-xl font-bold ${
-                              yearlyData.profit >= 0 ? 'text-green-600' : 'text-red-600'
-                            }`}
-                          >
-                            {formatCurrency(yearlyData.profit)}
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  ) : (
-                    <p className="text-muted-foreground">Ingen data</p>
-                  )}
-                </CardContent>
-              </Card>
-            </TabsContent>
-          </Tabs>
-        </>
-      )}
+                  </div>
+                </div>
+              ) : (
+                <div className="flex h-32 flex-col items-center justify-center gap-2">
+                  <Minus className="h-10 w-10 text-muted-foreground" />
+                  <p className="text-muted-foreground">Ingen data for denne måned</p>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
     </div>
   )
 }

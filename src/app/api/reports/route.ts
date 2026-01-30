@@ -41,6 +41,7 @@ export async function GET(request: NextRequest) {
   // Calculate totals
   let income = 0
   let expenses = 0
+  let unmatchedCount = 0
 
   const categoryTotals: Record<string, {
     categoryId: string
@@ -56,6 +57,11 @@ export async function GET(request: NextRequest) {
       income += amount
     } else {
       expenses += Math.abs(amount)
+    }
+
+    // Count unmatched transactions (no receipt attached)
+    if (!tx.matched && !tx.receiptId) {
+      unmatchedCount++
     }
 
     if (tx.category) {
@@ -79,6 +85,8 @@ export async function GET(request: NextRequest) {
     income,
     expenses,
     profit: income - expenses,
+    transactionCount: transactions.length,
+    unmatchedCount,
     byCategory,
   })
 }

@@ -183,42 +183,9 @@ export async function POST() {
       }
     }
 
-    // Also fetch payouts (bank transfers)
-    const payoutsResponse = await fetch(
-      'https://api.stripe.com/v1/payouts?limit=100',
-      {
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-        },
-      }
-    )
-
-    if (payoutsResponse.ok) {
-      const payoutsData = await payoutsResponse.json()
-      const payouts = payoutsData.data || []
-
-      for (const payout of payouts) {
-        if (payout.status !== 'paid') continue
-
-        const existing = await prisma.transaction.findFirst({
-          where: { externalId: `payout_${payout.id}` },
-        })
-
-        if (existing) continue
-
-        await prisma.transaction.create({
-          data: {
-            date: new Date(payout.arrival_date * 1000),
-            description: `Stripe udbetaling til bank`,
-            amount: payout.amount / 100, // Positive - money arriving in bank account
-            source: 'STRIPE',
-            externalId: `payout_${payout.id}`,
-          },
-        })
-
-        imported++
-      }
-    }
+    // Note: Payouts are NOT imported as they are just transfers to bank.
+    // The actual income is recorded via charges and invoices above.
+    // Bank imports will show the payout as a deposit, which can be matched.
 
     return NextResponse.json({ imported })
   } catch (error) {

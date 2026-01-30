@@ -84,27 +84,8 @@ export async function POST(request: NextRequest) {
         break
       }
 
-      case 'payout.paid': {
-        const payout = event.data.object
-
-        const payoutId = `payout_${payout.id}`
-        const existing = await prisma.transaction.findFirst({
-          where: { externalId: payoutId },
-        })
-
-        if (!existing) {
-          await prisma.transaction.create({
-            data: {
-              date: new Date(payout.arrival_date * 1000),
-              description: 'Stripe udbetaling',
-              amount: -(payout.amount / 100),
-              source: 'STRIPE',
-              externalId: payoutId,
-            },
-          })
-        }
-        break
-      }
+      // Note: payout.paid is intentionally not handled
+      // Payouts are just transfers and will show in bank imports
 
       default:
         console.log(`Unhandled event type: ${event.type}`)
