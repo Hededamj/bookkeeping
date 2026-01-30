@@ -101,6 +101,8 @@ export default function SettingsPage() {
   const [patternMatches, setPatternMatches] = useState<MatchingTransaction[]>([])
   const [searchingPattern, setSearchingPattern] = useState(false)
   const patternSearchTimeout = useRef<NodeJS.Timeout | null>(null)
+  const [syncingVendors, setSyncingVendors] = useState(false)
+  const [syncStatus, setSyncStatus] = useState<string | null>(null)
 
   // All settings
   const [settings, setSettings] = useState<AppSettings>({
@@ -296,6 +298,26 @@ export default function SettingsPage() {
     patternSearchTimeout.current = setTimeout(() => {
       searchTransactionsByPattern(pattern)
     }, 300)
+  }
+
+  const syncVendors = async () => {
+    setSyncingVendors(true)
+    setSyncStatus(null)
+    try {
+      const res = await fetch('/api/vendors/sync', { method: 'POST' })
+      const data = await res.json()
+      if (res.ok) {
+        setSyncStatus(data.message)
+        fetchVendors()
+      } else {
+        setSyncStatus('Fejl: ' + (data.error || 'Kunne ikke synkronisere'))
+      }
+    } catch (error) {
+      setSyncStatus('Fejl ved synkronisering')
+    } finally {
+      setSyncingVendors(false)
+      setTimeout(() => setSyncStatus(null), 5000)
+    }
   }
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1064,6 +1086,15 @@ export default function SettingsPage() {
                     Administrer leverandører og automatisk genkendelse
                   </CardDescription>
                 </div>
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    onClick={syncVendors}
+                    disabled={syncingVendors}
+                  >
+                    <RefreshCw className={`mr-2 h-4 w-4 ${syncingVendors ? 'animate-spin' : ''}`} />
+                    {syncingVendors ? 'Synkroniserer...' : 'Synkroniser fra transaktioner'}
+                  </Button>
                 <Dialog open={vendorDialogOpen} onOpenChange={(open) => {
                   setVendorDialogOpen(open)
                   if (!open) {
@@ -1157,7 +1188,13 @@ export default function SettingsPage() {
                     </DialogFooter>
                   </DialogContent>
                 </Dialog>
+                </div>
               </div>
+              {syncStatus && (
+                <p className={`mt-2 text-sm ${syncStatus.includes('Fejl') ? 'text-red-600' : 'text-green-600'}`}>
+                  {syncStatus}
+                </p>
+              )}
             </CardHeader>
             <CardContent>
               <div className="space-y-2">
