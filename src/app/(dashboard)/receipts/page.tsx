@@ -13,7 +13,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { formatCurrency, formatDate } from '@/lib/utils'
-import { Upload, Camera, Search, Image as ImageIcon, Loader2, X, FileText } from 'lucide-react'
+import { Upload, Camera, Search, Image as ImageIcon, Loader2, X, FileText, Trash2 } from 'lucide-react'
 
 // Helper to check if URL is a PDF
 const isPdf = (url: string, fileName: string | null): boolean => {
@@ -40,6 +40,7 @@ export default function ReceiptsPage() {
   const [receipts, setReceipts] = useState<Receipt[]>([])
   const [loading, setLoading] = useState(true)
   const [uploading, setUploading] = useState(false)
+  const [deleting, setDeleting] = useState(false)
   const [search, setSearch] = useState('')
   const [selectedReceipt, setSelectedReceipt] = useState<Receipt | null>(null)
   const [dragActive, setDragActive] = useState(false)
@@ -47,6 +48,26 @@ export default function ReceiptsPage() {
   useEffect(() => {
     fetchReceipts()
   }, [])
+
+  const deleteReceipt = async (id: string) => {
+    if (!confirm('Er du sikker på at du vil slette dette bilag?')) return
+
+    setDeleting(true)
+    try {
+      const res = await fetch(`/api/receipts/${id}`, { method: 'DELETE' })
+      if (res.ok) {
+        setSelectedReceipt(null)
+        fetchReceipts()
+      } else {
+        alert('Kunne ikke slette bilag')
+      }
+    } catch (error) {
+      console.error('Delete error:', error)
+      alert('Kunne ikke slette bilag')
+    } finally {
+      setDeleting(false)
+    }
+  }
 
   const fetchReceipts = async () => {
     try {
@@ -368,6 +389,19 @@ export default function ReceiptsPage() {
                   ) : (
                     <Badge variant="warning">Ikke matchet</Badge>
                   )}
+                </div>
+
+                {/* Delete button */}
+                <div className="pt-4 border-t">
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    onClick={() => deleteReceipt(selectedReceipt.id)}
+                    disabled={deleting}
+                  >
+                    <Trash2 className="mr-2 h-4 w-4" />
+                    {deleting ? 'Sletter...' : 'Slet bilag'}
+                  </Button>
                 </div>
               </div>
             </div>

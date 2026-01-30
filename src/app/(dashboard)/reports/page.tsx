@@ -23,7 +23,10 @@ import {
   FileText,
   CheckCircle2,
   Clock,
-  AlertCircle
+  AlertCircle,
+  Building2,
+  ChevronDown,
+  ChevronUp
 } from 'lucide-react'
 
 type ReportData = {
@@ -51,6 +54,21 @@ type YearSummary = {
   status: 'complete' | 'in-progress' | 'future'
 }
 
+type VendorData = {
+  name: string
+  pattern: string
+  count: number
+  total: number
+  categoryName: string | null
+  byYear: Record<number, number>
+  transactions: Array<{
+    id: string
+    date: string
+    description: string
+    amount: number
+  }>
+}
+
 const months = [
   'Januar', 'Februar', 'Marts', 'April', 'Maj', 'Juni',
   'Juli', 'August', 'September', 'Oktober', 'November', 'December'
@@ -63,6 +81,8 @@ export default function ReportsPage() {
   const [reportData, setReportData] = useState<ReportData | null>(null)
   const [yearlyData, setYearlyData] = useState<ReportData | null>(null)
   const [yearSummaries, setYearSummaries] = useState<YearSummary[]>([])
+  const [vendors, setVendors] = useState<VendorData[]>([])
+  const [expandedVendor, setExpandedVendor] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState('annual')
 
@@ -112,11 +132,14 @@ export default function ReportsPage() {
   const fetchReport = async () => {
     setLoading(true)
     try {
-      const [monthlyRes, yearlyRes] = await Promise.all([
+      const [monthlyRes, yearlyRes, vendorsRes] = await Promise.all([
         fetch(`/api/reports?year=${selectedYear}&month=${month}`),
         fetch(`/api/reports?year=${selectedYear}`),
+        fetch(`/api/reports/vendors?year=${selectedYear}`),
       ])
       const monthlyData = await monthlyRes.json()
+      const vendorsData = await vendorsRes.json()
+      setVendors(vendorsData.vendors || [])
       const yearlyDataResponse = await yearlyRes.json()
       setReportData(monthlyData)
       setYearlyData(yearlyDataResponse)
@@ -257,6 +280,10 @@ export default function ReportsPage() {
             <TabsTrigger value="annual">
               <FileText className="mr-2 h-4 w-4" />
               Årsregnskab {selectedYear}
+            </TabsTrigger>
+            <TabsTrigger value="vendors">
+              <Building2 className="mr-2 h-4 w-4" />
+              Leverandører
             </TabsTrigger>
             <TabsTrigger value="monthly">
               <Calendar className="mr-2 h-4 w-4" />
@@ -583,6 +610,103 @@ export default function ReportsPage() {
                 <div className="flex h-32 flex-col items-center justify-center gap-2">
                   <Minus className="h-10 w-10 text-muted-foreground" />
                   <p className="text-muted-foreground">Ingen data for denne måned</p>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* Vendors Tab */}
+        <TabsContent value="vendors" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle>Udgifter per leverandør</CardTitle>
+                  <CardDescription>
+                    {vendors.length} leverandører i {selectedYear}
+                  </CardDescription>
+                </div>
+                <Badge variant="outline">
+                  Total: {formatCurrency(vendors.reduce((sum, v) => sum + v.total, 0))}
+                </Badge>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {vendors.length === 0 ? (
+                <div className="flex h-32 flex-col items-center justify-center gap-2">
+                  <Building2 className="h-10 w-10 text-muted-foreground" />
+                  <p className="text-muted-foreground">Ingen udgifter fundet</p>
+                  <p className="text-sm text-muted-foreground">
+                    Importer transaktioner for at se leverandør-oversigt
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {/* Header */}
+                  <div className="grid grid-cols-12 gap-4 border-b pb-2 text-sm font-medium text-muted-foreground">
+                    <div className="col-span-4">Leverandør</div>
+                    <div className="col-span-2 text-right">Antal</div>
+                    <div className="col-span-2 text-right">2025</div>
+                    <div className="col-span-2 text-right">2026</div>
+                    <div className="col-span-2 text-right">Total</div>
+                  </div>
+
+                  {/* Vendor rows */}
+                  {vendors.map((vendor) => (
+                    <div key={vendor.pattern}>
+                      <div
+                        className="grid grid-cols-12 gap-4 items-center py-3 hover:bg-muted/50 rounded-lg cursor-pointer"
+                        onClick={() => setExpandedVendor(expandedVendor === vendor.pattern ? null : vendor.pattern)}
+                      >
+                        <div className="col-span-4 flex items-center gap-2">
+                          {expandedVendor === vendor.pattern ? (
+                            <ChevronUp className="h-4 w-4 text-muted-foreground" />
+                          ) : (
+                            <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                          )}
+                          <div>
+                            <p className="font-medium">{vendor.name}</p>
+                            {vendor.categoryName && (
+                              <p className="text-xs text-muted-foreground">{vendor.categoryName}</p>
+                            )}
+                          </div>
+                        </div>
+                        <div className="col-span-2 text-right text-muted-foreground">
+                          {vendor.count}
+                        </div>
+                        <div className="col-span-2 text-right">
+                          {vendor.byYear[2025] ? formatCurrency(vendor.byYear[2025]) : '-'}
+                        </div>
+                        <div className="col-span-2 text-right">
+                          {vendor.byYear[2026] ? formatCurrency(vendor.byYear[2026]) : '-'}
+                        </div>
+                        <div className="col-span-2 text-right font-semibold text-red-600">
+                          {formatCurrency(vendor.total)}
+                        </div>
+                      </div>
+
+                      {/* Expanded transactions */}
+                      {expandedVendor === vendor.pattern && (
+                        <div className="ml-6 mb-4 border-l-2 pl-4 space-y-1">
+                          <p className="text-xs font-medium text-muted-foreground mb-2">
+                            Seneste transaktioner:
+                          </p>
+                          {vendor.transactions.map((tx) => (
+                            <div key={tx.id} className="flex justify-between text-sm py-1">
+                              <div className="flex gap-4">
+                                <span className="text-muted-foreground">
+                                  {new Date(tx.date).toLocaleDateString('da-DK')}
+                                </span>
+                                <span className="truncate max-w-[300px]">{tx.description}</span>
+                              </div>
+                              <span className="text-red-600">{formatCurrency(tx.amount)}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
                 </div>
               )}
             </CardContent>
