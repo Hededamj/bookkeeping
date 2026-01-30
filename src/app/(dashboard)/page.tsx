@@ -8,29 +8,35 @@ import {
   Receipt,
   AlertCircle,
   CheckCircle2,
-  Clock
+  Clock,
+  Wallet
 } from 'lucide-react'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { getCompanyContext } from '@/lib/company'
 import { redirect } from 'next/navigation'
+import { YearSelector } from '@/components/year-selector'
+import { Suspense } from 'react'
 
-async function getStats(companyId: string) {
-  // Get current year stats
-  const now = new Date()
-  const startOfYear = new Date(now.getFullYear(), 0, 1)
-  const endOfYear = new Date(now.getFullYear(), 11, 31)
+async function getStats(companyId: string, year: number) {
+  const startOfYear = new Date(year, 0, 1)
+  const endOfYear = new Date(year, 11, 31)
+
+  // Also get previous year for comparison
+  const prevYear = year - 1
+  const startOfPrevYear = new Date(prevYear, 0, 1)
+  const endOfPrevYear = new Date(prevYear, 11, 31)
 
   const [
-    currentYearIncome,
-    currentYearExpenses,
-    allTimeIncome,
-    allTimeExpenses,
+    yearIncome,
+    yearExpenses,
+    prevYearIncome,
+    prevYearExpenses,
     unmatchedCount,
     receiptsCount,
     recentTransactions,
   ] = await Promise.all([
-    // Current year income
+    // Selected year income
     prisma.transaction.aggregate({
       where: {
         companyId,
@@ -39,7 +45,7 @@ async function getStats(companyId: string) {
       },
       _sum: { amount: true },
     }),
-    // Current year expenses
+    // Selected year expenses
     prisma.transaction.aggregate({
       where: {
         companyId,
@@ -48,18 +54,20 @@ async function getStats(companyId: string) {
       },
       _sum: { amount: true },
     }),
-    // All time income
+    // Previous year income (for YoY comparison)
     prisma.transaction.aggregate({
       where: {
         companyId,
+        date: { gte: startOfPrevYear, lte: endOfPrevYear },
         amount: { gt: 0 },
       },
       _sum: { amount: true },
     }),
-    // All time expenses
+    // Previous year expenses
     prisma.transaction.aggregate({
       where: {
         companyId,
+        date: { gte: startOfPrevYear, lte: endOfPrevYear },
         amount: { lt: 0 },
       },
       _sum: { amount: true },
@@ -74,30 +82,37 @@ async function getStats(companyId: string) {
       },
     }),
     prisma.transaction.findMany({
-      where: { companyId },
+      where: {
+        companyId,
+        date: { gte: startOfYear, lte: endOfYear },
+      },
       take: 5,
       orderBy: { date: 'desc' },
       include: { category: true, receipt: true },
     }),
   ])
 
-  // Use current year if there's data, otherwise use all-time
-  const hasCurrentYearData =
-    Number(currentYearIncome._sum.amount || 0) > 0 ||
-    Number(currentYearExpenses._sum.amount || 0) < 0
+  const income = Number(yearIncome._sum.amount || 0)
+  const expenses = Math.abs(Number(yearExpenses._sum.amount || 0))
+  const prevIncome = Number(prevYearIncome._sum.amount || 0)
+  const prevExpenses = Math.abs(Number(prevYearExpenses._sum.amount || 0))
+
+  // Calculate YoY change percentages
+  const incomeChange = prevIncome > 0 ? ((income - prevIncome) / prevIncome) * 100 : null
+  const expensesChange = prevExpenses > 0 ? ((expenses - prevExpenses) / prevExpenses) * 100 : null
 
   return {
-    income: hasCurrentYearData
-      ? Number(currentYearIncome._sum.amount || 0)
-      : Number(allTimeIncome._sum.amount || 0),
-    expenses: hasCurrentYearData
-      ? Math.abs(Number(currentYearExpenses._sum.amount || 0))
-      : Math.abs(Number(allTimeExpenses._sum.amount || 0)),
+    year,
+    income,
+    expenses,
+    profit: income - expenses,
+    prevIncome,
+    prevExpenses,
+    incomeChange,
+    expensesChange,
     unmatchedTransactions: unmatchedCount,
     unmatchedReceipts: receiptsCount,
     recentTransactions,
-    isCurrentYear: hasCurrentYearData,
-    year: hasCurrentYearData ? now.getFullYear() : null,
   }
 }
 
@@ -107,12 +122,14 @@ function StatCard({
   description,
   icon: Icon,
   trend,
+  change,
 }: {
   title: string
   value: string
   description?: string
   icon: React.ElementType
   trend?: 'up' | 'down' | 'neutral'
+  change?: number | null
 }) {
   return (
     <Card>
@@ -128,76 +145,141 @@ function StatCard({
       </CardHeader>
       <CardContent>
         <div className="text-2xl font-bold">{value}</div>
-        {description && (
-          <p className="text-xs text-muted-foreground">{description}</p>
-        )}
+        <div className="flex items-center gap-2">
+          {description && (
+            <p className="text-xs text-muted-foreground">{description}</p>
+          )}
+          {change !== null && change !== undefined && (
+            <Badge variant={change >= 0 ? 'default' : 'destructive'} className="text-xs">
+              {change >= 0 ? '+' : ''}{change.toFixed(0)}% YoY
+            </Badge>
+          )}
+        </div>
       </CardContent>
     </Card>
   )
 }
 
-export default async function DashboardPage() {
+export default async function DashboardPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ year?: string }>
+}) {
   const context = await getCompanyContext()
   if (!context) {
     redirect('/login')
   }
 
-  const stats = await getStats(context.companyId)
-  const periodLabel = stats.isCurrentYear
-    ? stats.year?.toString() || 'i år'
-    : 'total'
+  const params = await searchParams
+  const currentYear = new Date().getFullYear()
+  const selectedYear = params.year ? parseInt(params.year) : currentYear
+
+  const stats = await getStats(context.companyId, selectedYear)
 
   return (
     <div className="space-y-8">
-      <div>
-        <h1 className="text-3xl font-bold">Dashboard</h1>
-        <p className="text-muted-foreground">
-          {stats.isCurrentYear ? `Overblik for ${stats.year}` : 'Samlet overblik'}
-        </p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-bold">Dashboard</h1>
+          <p className="text-muted-foreground">Overblik for {selectedYear}</p>
+        </div>
+        <Suspense fallback={<div className="w-[100px] h-10 bg-muted animate-pulse rounded" />}>
+          <YearSelector currentYear={selectedYear} />
+        </Suspense>
       </div>
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         <StatCard
           title="Indtægter"
           value={formatCurrency(stats.income)}
-          description={stats.isCurrentYear ? `I ${stats.year}` : 'Samlet'}
+          description={`I ${selectedYear}`}
           icon={TrendingUp}
           trend="up"
+          change={stats.incomeChange}
         />
         <StatCard
           title="Udgifter"
           value={formatCurrency(stats.expenses)}
-          description={stats.isCurrentYear ? `I ${stats.year}` : 'Samlet'}
+          description={`I ${selectedYear}`}
           icon={TrendingDown}
           trend="down"
+          change={stats.expensesChange}
         />
         <StatCard
-          title="Uafstemte transaktioner"
+          title="Resultat"
+          value={formatCurrency(stats.profit)}
+          description={`I ${selectedYear}`}
+          icon={Wallet}
+          trend={stats.profit >= 0 ? 'up' : 'down'}
+        />
+        <StatCard
+          title="Uafstemte"
           value={stats.unmatchedTransactions.toString()}
           description="Mangler bilag"
           icon={AlertCircle}
           trend={stats.unmatchedTransactions > 0 ? 'down' : 'neutral'}
         />
-        <StatCard
-          title="Ubrugte bilag"
-          value={stats.unmatchedReceipts.toString()}
-          description="Ikke matchet"
-          icon={Receipt}
-          trend={stats.unmatchedReceipts > 0 ? 'down' : 'neutral'}
-        />
       </div>
+
+      {/* YoY Comparison */}
+      {stats.prevIncome > 0 || stats.prevExpenses > 0 ? (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-lg">Sammenligning med {selectedYear - 1}</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid gap-4 md:grid-cols-3">
+              <div className="space-y-1">
+                <p className="text-sm text-muted-foreground">Indtægter</p>
+                <div className="flex items-baseline gap-2">
+                  <span className="text-lg font-semibold">{formatCurrency(stats.income)}</span>
+                  <span className="text-sm text-muted-foreground">vs {formatCurrency(stats.prevIncome)}</span>
+                </div>
+                {stats.incomeChange !== null && (
+                  <Badge variant={stats.incomeChange >= 0 ? 'default' : 'destructive'}>
+                    {stats.incomeChange >= 0 ? '+' : ''}{stats.incomeChange.toFixed(1)}%
+                  </Badge>
+                )}
+              </div>
+              <div className="space-y-1">
+                <p className="text-sm text-muted-foreground">Udgifter</p>
+                <div className="flex items-baseline gap-2">
+                  <span className="text-lg font-semibold">{formatCurrency(stats.expenses)}</span>
+                  <span className="text-sm text-muted-foreground">vs {formatCurrency(stats.prevExpenses)}</span>
+                </div>
+                {stats.expensesChange !== null && (
+                  <Badge variant={stats.expensesChange <= 0 ? 'default' : 'destructive'}>
+                    {stats.expensesChange >= 0 ? '+' : ''}{stats.expensesChange.toFixed(1)}%
+                  </Badge>
+                )}
+              </div>
+              <div className="space-y-1">
+                <p className="text-sm text-muted-foreground">Resultat</p>
+                <div className="flex items-baseline gap-2">
+                  <span className={`text-lg font-semibold ${stats.profit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                    {formatCurrency(stats.profit)}
+                  </span>
+                  <span className="text-sm text-muted-foreground">
+                    vs {formatCurrency(stats.prevIncome - stats.prevExpenses)}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
 
       <div className="grid gap-4 lg:grid-cols-2">
         <Card>
           <CardHeader>
             <CardTitle>Seneste transaktioner</CardTitle>
-            <CardDescription>De nyeste bevægelser</CardDescription>
+            <CardDescription>Nyeste bevægelser i {selectedYear}</CardDescription>
           </CardHeader>
           <CardContent>
             <div className="space-y-4">
               {stats.recentTransactions.length === 0 ? (
                 <p className="text-sm text-muted-foreground">
-                  Ingen transaktioner endnu. Importer fra din bank eller Stripe.
+                  Ingen transaktioner i {selectedYear}. Vælg et andet år eller importer fra din bank.
                 </p>
               ) : (
                 stats.recentTransactions.map((tx) => (
