@@ -73,6 +73,12 @@ export async function POST() {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
+  // Get all existing vendors with their patterns
+  const existingVendors = await prisma.vendor.findMany({
+    where: { companyId: context.companyId },
+    select: { id: true, name: true, patterns: true },
+  })
+
   // Get all transactions without a vendor for this company
   const transactions = await prisma.transaction.findMany({
     where: {
@@ -82,9 +88,39 @@ export async function POST() {
   })
 
   // Group by extracted vendor name
-  const vendorGroups: Record<string, { name: string; pattern: string; transactionIds: string[] }> = {}
+  const vendorGroups: Record<string, { name: string; pattern: string; transactionIds: string[]; existingVendorId?: string }> = {}
 
   for (const tx of transactions) {
+    const lowerDesc = tx.description.toLowerCase()
+
+    // First, check if any existing vendor's patterns match
+    let matchedVendor: { id: string; name: string } | null = null
+    for (const vendor of existingVendors) {
+      for (const pattern of vendor.patterns) {
+        if (lowerDesc.includes(pattern.toLowerCase())) {
+          matchedVendor = { id: vendor.id, name: vendor.name }
+          break
+        }
+      }
+      if (matchedVendor) break
+    }
+
+    if (matchedVendor) {
+      // Use existing vendor
+      const key = `existing:${matchedVendor.id}`
+      if (!vendorGroups[key]) {
+        vendorGroups[key] = {
+          name: matchedVendor.name,
+          pattern: '',
+          transactionIds: [],
+          existingVendorId: matchedVendor.id,
+        }
+      }
+      vendorGroups[key].transactionIds.push(tx.id)
+      continue
+    }
+
+    // Fall back to extracting vendor name
     const vendorName = extractVendorName(tx.description)
     if (!vendorName) continue
 
@@ -106,24 +142,32 @@ export async function POST() {
 
   // Create vendors and link transactions
   for (const group of Object.values(vendorGroups)) {
-    // Check if vendor already exists
-    let vendor = await prisma.vendor.findFirst({
-      where: {
-        companyId: context.companyId,
-        name: { equals: group.name, mode: 'insensitive' },
-      },
-    })
+    let vendorId: string
 
-    if (!vendor) {
-      // Create new vendor
-      vendor = await prisma.vendor.create({
-        data: {
+    if (group.existingVendorId) {
+      // Already matched to existing vendor via patterns
+      vendorId = group.existingVendorId
+    } else {
+      // Check if vendor already exists by name
+      let vendor = await prisma.vendor.findFirst({
+        where: {
           companyId: context.companyId,
-          name: group.name,
-          patterns: [group.pattern],
+          name: { equals: group.name, mode: 'insensitive' },
         },
       })
-      created++
+
+      if (!vendor) {
+        // Create new vendor
+        vendor = await prisma.vendor.create({
+          data: {
+            companyId: context.companyId,
+            name: group.name,
+            patterns: [group.pattern],
+          },
+        })
+        created++
+      }
+      vendorId = vendor.id
     }
 
     // Link transactions to vendor
@@ -132,7 +176,7 @@ export async function POST() {
         id: { in: group.transactionIds },
       },
       data: {
-        vendorId: vendor.id,
+        vendorId,
       },
     })
     linked += group.transactionIds.length
