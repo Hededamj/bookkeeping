@@ -49,6 +49,14 @@ type Category = {
   keywords: string[]
 }
 
+type Vendor = {
+  id: string
+  name: string
+  patterns: string[]
+  defaultCategory: Category | null
+  _count: { transactions: number }
+}
+
 type CSVMapping = {
   date: number
   description: number
@@ -78,6 +86,11 @@ export default function SettingsPage() {
   const [categories, setCategories] = useState<Category[]>([])
   const [newCategory, setNewCategory] = useState<{ name: string; type: 'INCOME' | 'EXPENSE' }>({ name: '', type: 'EXPENSE' })
   const [categoryDialogOpen, setCategoryDialogOpen] = useState(false)
+
+  // Vendors
+  const [vendors, setVendors] = useState<Vendor[]>([])
+  const [newVendor, setNewVendor] = useState<{ name: string; pattern: string; categoryId: string }>({ name: '', pattern: '', categoryId: '' })
+  const [vendorDialogOpen, setVendorDialogOpen] = useState(false)
 
   // All settings
   const [settings, setSettings] = useState<AppSettings>({
@@ -118,6 +131,7 @@ export default function SettingsPage() {
 
   useEffect(() => {
     fetchCategories()
+    fetchVendors()
     fetchSettings()
     if (typeof window !== 'undefined') {
       setWebhookUrl(`${window.location.origin}/api/email/inbound`)
@@ -199,6 +213,46 @@ export default function SettingsPage() {
       fetchCategories()
     } catch (error) {
       console.error('Failed to delete category:', error)
+    }
+  }
+
+  const fetchVendors = async () => {
+    try {
+      const res = await fetch('/api/vendors')
+      const data = await res.json()
+      setVendors(data)
+    } catch (error) {
+      console.error('Failed to fetch vendors:', error)
+    }
+  }
+
+  const createVendor = async () => {
+    if (!newVendor.name) return
+
+    try {
+      await fetch('/api/vendors', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: newVendor.name,
+          pattern: newVendor.pattern || undefined,
+          categoryId: newVendor.categoryId || undefined,
+        }),
+      })
+      fetchVendors()
+      setNewVendor({ name: '', pattern: '', categoryId: '' })
+      setVendorDialogOpen(false)
+    } catch (error) {
+      console.error('Failed to create vendor:', error)
+    }
+  }
+
+  const deleteVendor = async (id: string) => {
+    try {
+      await fetch(`/api/vendors/${id}`, { method: 'DELETE' })
+      fetchVendors()
+    } catch (error) {
+      console.error('Failed to delete vendor:', error)
     }
   }
 
@@ -321,6 +375,10 @@ export default function SettingsPage() {
           <TabsTrigger value="categories">
             <Tag className="mr-2 h-4 w-4" />
             Kategorier
+          </TabsTrigger>
+          <TabsTrigger value="vendors">
+            <SettingsIcon className="mr-2 h-4 w-4" />
+            Leverandører
           </TabsTrigger>
         </TabsList>
 
@@ -942,6 +1000,130 @@ export default function SettingsPage() {
                         variant="ghost"
                         size="icon"
                         onClick={() => deleteCategory(cat.id)}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  ))
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* Vendors */}
+        <TabsContent value="vendors" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle>Leverandører</CardTitle>
+                  <CardDescription>
+                    Administrer leverandører og automatisk genkendelse
+                  </CardDescription>
+                </div>
+                <Dialog open={vendorDialogOpen} onOpenChange={setVendorDialogOpen}>
+                  <DialogTrigger asChild>
+                    <Button>
+                      <Plus className="mr-2 h-4 w-4" />
+                      Ny leverandør
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent>
+                    <DialogHeader>
+                      <DialogTitle>Opret leverandør</DialogTitle>
+                      <DialogDescription>
+                        Tilføj en ny leverandør med genkendelsesmønster
+                      </DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-4">
+                      <div>
+                        <Label htmlFor="vendorName">Navn</Label>
+                        <Input
+                          id="vendorName"
+                          value={newVendor.name}
+                          onChange={(e) =>
+                            setNewVendor((v) => ({ ...v, name: e.target.value }))
+                          }
+                          placeholder="f.eks. Microsoft"
+                        />
+                      </div>
+                      <div>
+                        <Label htmlFor="vendorPattern">Mønster (valgfrit)</Label>
+                        <Input
+                          id="vendorPattern"
+                          value={newVendor.pattern}
+                          onChange={(e) =>
+                            setNewVendor((v) => ({ ...v, pattern: e.target.value }))
+                          }
+                          placeholder="f.eks. MICROSOFT eller MSFTCharge"
+                        />
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          Tekst der skal matche i transaktionsbeskrivelsen
+                        </p>
+                      </div>
+                      <div>
+                        <Label>Standard kategori (valgfrit)</Label>
+                        <Select
+                          value={newVendor.categoryId}
+                          onValueChange={(v) =>
+                            setNewVendor((c) => ({ ...c, categoryId: v }))
+                          }
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="Vælg kategori" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {categories.map((cat) => (
+                              <SelectItem key={cat.id} value={cat.id}>
+                                {cat.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+                    <DialogFooter>
+                      <Button onClick={createVendor}>Opret</Button>
+                    </DialogFooter>
+                  </DialogContent>
+                </Dialog>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-2">
+                {vendors.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">
+                    Ingen leverandører oprettet endnu
+                  </p>
+                ) : (
+                  vendors.map((vendor) => (
+                    <div
+                      key={vendor.id}
+                      className="flex items-center justify-between rounded-lg border p-3"
+                    >
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium">{vendor.name}</span>
+                          <Badge variant="secondary">
+                            {vendor._count.transactions} transaktioner
+                          </Badge>
+                        </div>
+                        {vendor.patterns.length > 0 && (
+                          <p className="text-xs text-muted-foreground">
+                            Mønstre: {vendor.patterns.join(', ')}
+                          </p>
+                        )}
+                        {vendor.defaultCategory && (
+                          <p className="text-xs text-muted-foreground">
+                            Kategori: {vendor.defaultCategory.name}
+                          </p>
+                        )}
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => deleteVendor(vendor.id)}
                       >
                         <Trash2 className="h-4 w-4" />
                       </Button>
