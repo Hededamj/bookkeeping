@@ -242,7 +242,7 @@ export default function SettingsPage() {
     if (!newVendor.name) return
 
     try {
-      await fetch('/api/vendors', {
+      const res = await fetch('/api/vendors', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -251,9 +251,16 @@ export default function SettingsPage() {
           categoryId: newVendor.categoryId || undefined,
         }),
       })
+      const data = await res.json()
       fetchVendors()
       setNewVendor({ name: '', pattern: '', categoryId: '' })
+      setPatternMatches([])
       setVendorDialogOpen(false)
+
+      if (data.linkedTransactions > 0) {
+        setSyncStatus(`Oprettet "${data.name}" og linket ${data.linkedTransactions} transaktioner`)
+        setTimeout(() => setSyncStatus(null), 5000)
+      }
     } catch (error) {
       console.error('Failed to create vendor:', error)
     }

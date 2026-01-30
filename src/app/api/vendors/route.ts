@@ -45,6 +45,8 @@ export async function POST(request: NextRequest) {
     },
   })
 
+  const patterns: string[] = []
+
   if (vendor) {
     // Add pattern to existing vendor if provided and not already there
     if (pattern && !vendor.patterns.some(p => p.toLowerCase() === pattern.toLowerCase())) {
@@ -56,17 +58,44 @@ export async function POST(request: NextRequest) {
         },
       })
     }
+    patterns.push(...vendor.patterns)
   } else {
     // Create new vendor
+    if (pattern) patterns.push(pattern.toUpperCase())
     vendor = await prisma.vendor.create({
       data: {
         companyId: context.companyId,
         name,
-        patterns: pattern ? [pattern.toUpperCase()] : [],
+        patterns,
         defaultCategoryId: categoryId || null,
       },
     })
   }
 
-  return NextResponse.json(vendor)
+  // Link matching transactions to this vendor
+  let linkedCount = 0
+  if (patterns.length > 0) {
+    for (const p of patterns) {
+      const result = await prisma.transaction.updateMany({
+        where: {
+          companyId: context.companyId,
+          vendorId: null, // Only unlinked transactions
+          description: {
+            contains: p,
+            mode: 'insensitive',
+          },
+        },
+        data: {
+          vendorId: vendor.id,
+          ...(categoryId && { categoryId }),
+        },
+      })
+      linkedCount += result.count
+    }
+  }
+
+  return NextResponse.json({
+    ...vendor,
+    linkedTransactions: linkedCount
+  })
 }
