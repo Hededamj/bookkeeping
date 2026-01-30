@@ -57,6 +57,13 @@ type Vendor = {
   _count: { transactions: number }
 }
 
+type MatchingTransaction = {
+  id: string
+  description: string
+  amount: number
+  date: string
+}
+
 type CSVMapping = {
   date: number
   description: number
@@ -91,6 +98,9 @@ export default function SettingsPage() {
   const [vendors, setVendors] = useState<Vendor[]>([])
   const [newVendor, setNewVendor] = useState<{ name: string; pattern: string; categoryId: string }>({ name: '', pattern: '', categoryId: '' })
   const [vendorDialogOpen, setVendorDialogOpen] = useState(false)
+  const [patternMatches, setPatternMatches] = useState<MatchingTransaction[]>([])
+  const [searchingPattern, setSearchingPattern] = useState(false)
+  const patternSearchTimeout = useRef<NodeJS.Timeout | null>(null)
 
   // All settings
   const [settings, setSettings] = useState<AppSettings>({
@@ -254,6 +264,38 @@ export default function SettingsPage() {
     } catch (error) {
       console.error('Failed to delete vendor:', error)
     }
+  }
+
+  const searchTransactionsByPattern = async (pattern: string) => {
+    if (!pattern || pattern.length < 2) {
+      setPatternMatches([])
+      return
+    }
+
+    setSearchingPattern(true)
+    try {
+      const res = await fetch(`/api/transactions/search?pattern=${encodeURIComponent(pattern)}`)
+      if (res.ok) {
+        const data = await res.json()
+        setPatternMatches(data)
+      }
+    } catch (error) {
+      console.error('Failed to search transactions:', error)
+    } finally {
+      setSearchingPattern(false)
+    }
+  }
+
+  const handlePatternChange = (pattern: string) => {
+    setNewVendor((v) => ({ ...v, pattern }))
+
+    // Debounce the search
+    if (patternSearchTimeout.current) {
+      clearTimeout(patternSearchTimeout.current)
+    }
+    patternSearchTimeout.current = setTimeout(() => {
+      searchTransactionsByPattern(pattern)
+    }, 300)
   }
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1022,7 +1064,13 @@ export default function SettingsPage() {
                     Administrer leverandører og automatisk genkendelse
                   </CardDescription>
                 </div>
-                <Dialog open={vendorDialogOpen} onOpenChange={setVendorDialogOpen}>
+                <Dialog open={vendorDialogOpen} onOpenChange={(open) => {
+                  setVendorDialogOpen(open)
+                  if (!open) {
+                    setPatternMatches([])
+                    setNewVendor({ name: '', pattern: '', categoryId: '' })
+                  }
+                }}>
                   <DialogTrigger asChild>
                     <Button>
                       <Plus className="mr-2 h-4 w-4" />
@@ -1053,14 +1101,35 @@ export default function SettingsPage() {
                         <Input
                           id="vendorPattern"
                           value={newVendor.pattern}
-                          onChange={(e) =>
-                            setNewVendor((v) => ({ ...v, pattern: e.target.value }))
-                          }
+                          onChange={(e) => handlePatternChange(e.target.value)}
                           placeholder="f.eks. MICROSOFT eller MSFTCharge"
                         />
                         <p className="mt-1 text-xs text-muted-foreground">
                           Tekst der skal matche i transaktionsbeskrivelsen
                         </p>
+
+                        {/* Pattern match preview */}
+                        {newVendor.pattern.length >= 2 && (
+                          <div className="mt-3 rounded-lg border bg-muted/50 p-3">
+                            <p className="text-xs font-medium mb-2">
+                              {searchingPattern ? 'Søger...' : `${patternMatches.length} matchende transaktioner:`}
+                            </p>
+                            {patternMatches.length > 0 ? (
+                              <div className="space-y-1 max-h-32 overflow-y-auto">
+                                {patternMatches.map((tx) => (
+                                  <div key={tx.id} className="text-xs flex justify-between">
+                                    <span className="truncate flex-1 mr-2">{tx.description}</span>
+                                    <span className={Number(tx.amount) >= 0 ? 'text-green-600' : 'text-red-600'}>
+                                      {Number(tx.amount).toLocaleString('da-DK', { style: 'currency', currency: 'DKK' })}
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : !searchingPattern && (
+                              <p className="text-xs text-muted-foreground">Ingen transaktioner matcher dette mønster</p>
+                            )}
+                          </div>
+                        )}
                       </div>
                       <div>
                         <Label>Standard kategori (valgfrit)</Label>
