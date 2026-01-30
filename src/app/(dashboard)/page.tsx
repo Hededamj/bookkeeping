@@ -16,29 +16,50 @@ import { getCompanyContext } from '@/lib/company'
 import { redirect } from 'next/navigation'
 
 async function getStats(companyId: string) {
+  // Get current year stats
   const now = new Date()
-  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1)
-  const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0)
+  const startOfYear = new Date(now.getFullYear(), 0, 1)
+  const endOfYear = new Date(now.getFullYear(), 11, 31)
 
   const [
-    totalIncome,
-    totalExpenses,
+    currentYearIncome,
+    currentYearExpenses,
+    allTimeIncome,
+    allTimeExpenses,
     unmatchedCount,
     receiptsCount,
     recentTransactions,
   ] = await Promise.all([
+    // Current year income
     prisma.transaction.aggregate({
       where: {
         companyId,
-        date: { gte: startOfMonth, lte: endOfMonth },
+        date: { gte: startOfYear, lte: endOfYear },
         amount: { gt: 0 },
       },
       _sum: { amount: true },
     }),
+    // Current year expenses
     prisma.transaction.aggregate({
       where: {
         companyId,
-        date: { gte: startOfMonth, lte: endOfMonth },
+        date: { gte: startOfYear, lte: endOfYear },
+        amount: { lt: 0 },
+      },
+      _sum: { amount: true },
+    }),
+    // All time income
+    prisma.transaction.aggregate({
+      where: {
+        companyId,
+        amount: { gt: 0 },
+      },
+      _sum: { amount: true },
+    }),
+    // All time expenses
+    prisma.transaction.aggregate({
+      where: {
+        companyId,
         amount: { lt: 0 },
       },
       _sum: { amount: true },
@@ -60,12 +81,23 @@ async function getStats(companyId: string) {
     }),
   ])
 
+  // Use current year if there's data, otherwise use all-time
+  const hasCurrentYearData =
+    Number(currentYearIncome._sum.amount || 0) > 0 ||
+    Number(currentYearExpenses._sum.amount || 0) < 0
+
   return {
-    income: Number(totalIncome._sum.amount || 0),
-    expenses: Math.abs(Number(totalExpenses._sum.amount || 0)),
+    income: hasCurrentYearData
+      ? Number(currentYearIncome._sum.amount || 0)
+      : Number(allTimeIncome._sum.amount || 0),
+    expenses: hasCurrentYearData
+      ? Math.abs(Number(currentYearExpenses._sum.amount || 0))
+      : Math.abs(Number(allTimeExpenses._sum.amount || 0)),
     unmatchedTransactions: unmatchedCount,
     unmatchedReceipts: receiptsCount,
     recentTransactions,
+    isCurrentYear: hasCurrentYearData,
+    year: hasCurrentYearData ? now.getFullYear() : null,
   }
 }
 
@@ -111,27 +143,31 @@ export default async function DashboardPage() {
   }
 
   const stats = await getStats(context.companyId)
-  const monthName = new Date().toLocaleDateString('da-DK', { month: 'long' })
+  const periodLabel = stats.isCurrentYear
+    ? stats.year?.toString() || 'i år'
+    : 'total'
 
   return (
     <div className="space-y-8">
       <div>
         <h1 className="text-3xl font-bold">Dashboard</h1>
-        <p className="text-muted-foreground">Overblik for {monthName}</p>
+        <p className="text-muted-foreground">
+          {stats.isCurrentYear ? `Overblik for ${stats.year}` : 'Samlet overblik'}
+        </p>
       </div>
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         <StatCard
           title="Indtægter"
           value={formatCurrency(stats.income)}
-          description={`I ${monthName}`}
+          description={stats.isCurrentYear ? `I ${stats.year}` : 'Samlet'}
           icon={TrendingUp}
           trend="up"
         />
         <StatCard
           title="Udgifter"
           value={formatCurrency(stats.expenses)}
-          description={`I ${monthName}`}
+          description={stats.isCurrentYear ? `I ${stats.year}` : 'Samlet'}
           icon={TrendingDown}
           trend="down"
         />

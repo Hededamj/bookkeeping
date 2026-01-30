@@ -45,7 +45,7 @@ export async function PATCH(
   }
 
   const body = await request.json()
-  const { name, patterns, defaultCategoryId } = body
+  const { name, patterns, defaultCategoryId, applyToTransactions } = body
 
   // Verify vendor belongs to this company
   const existing = await prisma.vendor.findFirst({
@@ -65,5 +65,20 @@ export async function PATCH(
     },
   })
 
-  return NextResponse.json(vendor)
+  // Optionally apply the new category to all linked transactions
+  let updatedTransactions = 0
+  if (applyToTransactions && defaultCategoryId !== undefined) {
+    const result = await prisma.transaction.updateMany({
+      where: {
+        companyId: context.companyId,
+        vendorId: params.id,
+      },
+      data: {
+        categoryId: defaultCategoryId,
+      },
+    })
+    updatedTransactions = result.count
+  }
+
+  return NextResponse.json({ ...vendor, updatedTransactions })
 }

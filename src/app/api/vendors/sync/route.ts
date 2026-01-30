@@ -73,10 +73,10 @@ export async function POST() {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  // Get all existing vendors with their patterns
+  // Get all existing vendors with their patterns and default category
   const existingVendors = await prisma.vendor.findMany({
     where: { companyId: context.companyId },
-    select: { id: true, name: true, patterns: true },
+    select: { id: true, name: true, patterns: true, defaultCategoryId: true },
   })
 
   // Get all transactions without a vendor for this company
@@ -88,17 +88,17 @@ export async function POST() {
   })
 
   // Group by extracted vendor name
-  const vendorGroups: Record<string, { name: string; pattern: string; transactionIds: string[]; existingVendorId?: string }> = {}
+  const vendorGroups: Record<string, { name: string; pattern: string; transactionIds: string[]; existingVendorId?: string; categoryId?: string | null }> = {}
 
   for (const tx of transactions) {
     const lowerDesc = tx.description.toLowerCase()
 
     // First, check if any existing vendor's patterns match
-    let matchedVendor: { id: string; name: string } | null = null
+    let matchedVendor: { id: string; name: string; categoryId: string | null } | null = null
     for (const vendor of existingVendors) {
       for (const pattern of vendor.patterns) {
         if (lowerDesc.includes(pattern.toLowerCase())) {
-          matchedVendor = { id: vendor.id, name: vendor.name }
+          matchedVendor = { id: vendor.id, name: vendor.name, categoryId: vendor.defaultCategoryId }
           break
         }
       }
@@ -114,6 +114,7 @@ export async function POST() {
           pattern: '',
           transactionIds: [],
           existingVendorId: matchedVendor.id,
+          categoryId: matchedVendor.categoryId,
         }
       }
       vendorGroups[key].transactionIds.push(tx.id)
@@ -170,13 +171,14 @@ export async function POST() {
       vendorId = vendor.id
     }
 
-    // Link transactions to vendor
+    // Link transactions to vendor and apply category if set
     await prisma.transaction.updateMany({
       where: {
         id: { in: group.transactionIds },
       },
       data: {
         vendorId,
+        ...(group.categoryId && { categoryId: group.categoryId }),
       },
     })
     linked += group.transactionIds.length

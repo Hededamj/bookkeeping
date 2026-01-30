@@ -275,6 +275,27 @@ export default function SettingsPage() {
     }
   }
 
+  const updateVendorCategory = async (vendorId: string, categoryId: string | null) => {
+    try {
+      const res = await fetch(`/api/vendors/${vendorId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          defaultCategoryId: categoryId,
+          applyToTransactions: true
+        }),
+      })
+      const data = await res.json()
+      fetchVendors()
+      if (data.updatedTransactions > 0) {
+        setSyncStatus(`Opdaterede kategori for ${data.updatedTransactions} transaktioner`)
+        setTimeout(() => setSyncStatus(null), 3000)
+      }
+    } catch (error) {
+      console.error('Failed to update vendor category:', error)
+    }
+  }
+
   const searchTransactionsByPattern = async (pattern: string) => {
     if (!pattern || pattern.length < 2) {
       setPatternMatches([])
@@ -1215,7 +1236,7 @@ export default function SettingsPage() {
                       key={vendor.id}
                       className="flex items-center justify-between rounded-lg border p-3"
                     >
-                      <div className="space-y-1">
+                      <div className="space-y-1 flex-1">
                         <div className="flex items-center gap-2">
                           <span className="font-medium">{vendor.name}</span>
                           <Badge variant="secondary">
@@ -1227,19 +1248,32 @@ export default function SettingsPage() {
                             Mønstre: {vendor.patterns.join(', ')}
                           </p>
                         )}
-                        {vendor.defaultCategory && (
-                          <p className="text-xs text-muted-foreground">
-                            Kategori: {vendor.defaultCategory.name}
-                          </p>
-                        )}
                       </div>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => deleteVendor(vendor.id)}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
+                      <div className="flex items-center gap-2">
+                        <Select
+                          value={vendor.defaultCategory?.id || 'none'}
+                          onValueChange={(v) => updateVendorCategory(vendor.id, v === 'none' ? null : v)}
+                        >
+                          <SelectTrigger className="w-40">
+                            <SelectValue placeholder="Vælg kategori" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="none">Ingen kategori</SelectItem>
+                            {categories.map((cat) => (
+                              <SelectItem key={cat.id} value={cat.id}>
+                                {cat.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => deleteVendor(vendor.id)}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
                     </div>
                   ))
                 )}
