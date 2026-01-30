@@ -13,7 +13,15 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { formatCurrency, formatDate } from '@/lib/utils'
-import { Upload, Camera, Search, Image as ImageIcon, Loader2, X } from 'lucide-react'
+import { Upload, Camera, Search, Image as ImageIcon, Loader2, X, FileText } from 'lucide-react'
+
+// Helper to check if URL is a PDF
+const isPdf = (url: string, fileName: string | null): boolean => {
+  if (fileName?.toLowerCase().endsWith('.pdf')) return true
+  if (url.startsWith('data:application/pdf')) return true
+  if (url.toLowerCase().endsWith('.pdf')) return true
+  return false
+}
 
 type Receipt = {
   id: string
@@ -235,11 +243,21 @@ export default function ReceiptsPage() {
                   onClick={() => setSelectedReceipt(receipt)}
                 >
                   <div className="aspect-[3/4] overflow-hidden">
-                    <img
-                      src={receipt.imageUrl}
-                      alt={receipt.fileName || 'Bilag'}
-                      className="h-full w-full object-cover transition-transform group-hover:scale-105"
-                    />
+                    {isPdf(receipt.imageUrl, receipt.fileName) ? (
+                      <div className="flex h-full w-full flex-col items-center justify-center bg-muted">
+                        <FileText className="h-16 w-16 text-red-500" />
+                        <p className="mt-2 text-sm font-medium text-muted-foreground">PDF</p>
+                        <p className="mt-1 max-w-[80%] truncate text-xs text-muted-foreground">
+                          {receipt.fileName}
+                        </p>
+                      </div>
+                    ) : (
+                      <img
+                        src={receipt.imageUrl}
+                        alt={receipt.fileName || 'Bilag'}
+                        className="h-full w-full object-cover transition-transform group-hover:scale-105"
+                      />
+                    )}
                   </div>
                   <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 to-transparent p-3">
                     <div className="text-white">
@@ -285,12 +303,30 @@ export default function ReceiptsPage() {
           </DialogHeader>
           {selectedReceipt && (
             <div className="grid gap-4 md:grid-cols-2">
-              <div className="overflow-hidden rounded-lg">
-                <img
-                  src={selectedReceipt.imageUrl}
-                  alt="Bilag"
-                  className="w-full"
-                />
+              <div className="overflow-hidden rounded-lg bg-muted">
+                {isPdf(selectedReceipt.imageUrl, selectedReceipt.fileName) ? (
+                  <div className="flex flex-col">
+                    <iframe
+                      src={selectedReceipt.imageUrl}
+                      className="h-[500px] w-full"
+                      title="PDF bilag"
+                    />
+                    <a
+                      href={selectedReceipt.imageUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="mt-2 text-center text-sm text-primary hover:underline"
+                    >
+                      Åbn PDF i nyt vindue
+                    </a>
+                  </div>
+                ) : (
+                  <img
+                    src={selectedReceipt.imageUrl}
+                    alt="Bilag"
+                    className="w-full"
+                  />
+                )}
               </div>
               <div className="space-y-4">
                 <div>

@@ -33,8 +33,21 @@ export async function POST(request: NextRequest) {
       },
     })
 
-    // Trigger OCR processing asynchronously
-    processOCR(receipt.id, base64).catch(console.error)
+    // Trigger OCR processing asynchronously (for images)
+    // PDF OCR requires different handling
+    const isPdf = mimeType === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')
+
+    if (!isPdf) {
+      processOCR(receipt.id, base64, mimeType).catch(console.error)
+    } else {
+      // For PDFs, mark that OCR is pending (needs manual review or PDF-specific processing)
+      await prisma.receipt.update({
+        where: { id: receipt.id },
+        data: {
+          notes: 'PDF uploadet - OCR kræver manuel gennemgang eller Google Document AI'
+        }
+      })
+    }
 
     return NextResponse.json(receipt)
   } catch (error) {
@@ -46,7 +59,7 @@ export async function POST(request: NextRequest) {
   }
 }
 
-async function processOCR(receiptId: string, base64Image: string) {
+async function processOCR(receiptId: string, base64Image: string, mimeType: string) {
   // Get API key from settings
   const settings = await getSettings()
   const apiKey = settings.googleCloudKey
