@@ -3,8 +3,18 @@ import { prisma } from '@/lib/prisma'
 import { suggestVendorName } from '@/lib/vendor-matcher'
 import { getCompanyContext } from '@/lib/company'
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   const context = await getCompanyContext()
+
+  // Debug mode - add ?debug=1 to see context info
+  const { searchParams } = new URL(request.url)
+  if (searchParams.get('debug') === '1') {
+    return NextResponse.json({
+      context,
+      message: 'Debug info - context shows which user/company is active'
+    })
+  }
+
   if (!context) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }

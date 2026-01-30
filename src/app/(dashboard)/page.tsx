@@ -1,4 +1,3 @@
-import { Suspense } from 'react'
 import { prisma } from '@/lib/prisma'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -13,8 +12,10 @@ import {
 } from 'lucide-react'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
+import { getCompanyContext } from '@/lib/company'
+import { redirect } from 'next/navigation'
 
-async function getStats() {
+async function getStats(companyId: string) {
   const now = new Date()
   const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1)
   const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0)
@@ -28,6 +29,7 @@ async function getStats() {
   ] = await Promise.all([
     prisma.transaction.aggregate({
       where: {
+        companyId,
         date: { gte: startOfMonth, lte: endOfMonth },
         amount: { gt: 0 },
       },
@@ -35,20 +37,23 @@ async function getStats() {
     }),
     prisma.transaction.aggregate({
       where: {
+        companyId,
         date: { gte: startOfMonth, lte: endOfMonth },
         amount: { lt: 0 },
       },
       _sum: { amount: true },
     }),
     prisma.transaction.count({
-      where: { matched: false },
+      where: { companyId, matched: false },
     }),
     prisma.receipt.count({
       where: {
+        companyId,
         transactions: { none: {} },
       },
     }),
     prisma.transaction.findMany({
+      where: { companyId },
       take: 5,
       orderBy: { date: 'desc' },
       include: { category: true, receipt: true },
@@ -100,7 +105,12 @@ function StatCard({
 }
 
 export default async function DashboardPage() {
-  const stats = await getStats()
+  const context = await getCompanyContext()
+  if (!context) {
+    redirect('/login')
+  }
+
+  const stats = await getStats(context.companyId)
   const monthName = new Date().toLocaleDateString('da-DK', { month: 'long' })
 
   return (
