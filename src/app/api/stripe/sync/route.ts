@@ -1,18 +1,19 @@
 import { NextResponse } from 'next/server'
-import { getServerSession } from 'next-auth'
-import { authOptions } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import { getSettings } from '@/lib/settings'
+import { getCompanyContext } from '@/lib/company'
 
 export async function POST() {
-  const session = await getServerSession(authOptions)
-  if (!session) {
+  const context = await getCompanyContext()
+  if (!context) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
+  const companyId = context.companyId
+
   try {
     // Get API key from settings
-    const settings = await getSettings()
+    const settings = await getSettings(companyId)
     const apiKey = settings.stripeSecretKey
 
     if (!apiKey || !apiKey.startsWith('sk_')) {
@@ -51,7 +52,7 @@ export async function POST() {
 
       // Check if already imported
       const existing = await prisma.transaction.findFirst({
-        where: { externalId: charge.id },
+        where: { companyId, externalId: charge.id },
         include: { receipt: true },
       })
 
@@ -60,6 +61,7 @@ export async function POST() {
         if (!existing.receipt && charge.receipt_url) {
           const receipt = await prisma.receipt.create({
             data: {
+              companyId,
               imageUrl: charge.receipt_url,
               fileName: `Stripe kvittering - ${charge.id}.html`,
               notes: `Stripe kvittering for ${charge.billing_details?.name || 'betaling'}`,
@@ -81,6 +83,7 @@ export async function POST() {
       if (charge.receipt_url) {
         const receipt = await prisma.receipt.create({
           data: {
+            companyId,
             imageUrl: charge.receipt_url,
             fileName: `Stripe kvittering - ${charge.id}.html`,
             notes: `Stripe kvittering for ${charge.billing_details?.name || 'betaling'}`,
@@ -95,6 +98,7 @@ export async function POST() {
       // Create transaction with linked receipt
       await prisma.transaction.create({
         data: {
+          companyId,
           date: new Date(charge.created * 1000),
           description: charge.description || `Stripe: ${charge.billing_details?.name || 'Betaling'}`,
           amount: charge.amount / 100, // Stripe amounts are in cents
@@ -126,7 +130,7 @@ export async function POST() {
         const invoiceExternalId = `invoice_${invoice.id}`
 
         const existing = await prisma.transaction.findFirst({
-          where: { externalId: invoiceExternalId },
+          where: { companyId, externalId: invoiceExternalId },
           include: { receipt: true },
         })
 
@@ -135,6 +139,7 @@ export async function POST() {
           if (!existing.receipt && invoice.invoice_pdf) {
             const receipt = await prisma.receipt.create({
               data: {
+                companyId,
                 imageUrl: invoice.invoice_pdf,
                 fileName: `Stripe faktura - ${invoice.number || invoice.id}.pdf`,
                 notes: `Stripe faktura ${invoice.number || ''} - ${invoice.customer_name || invoice.customer_email || 'Kunde'}`,
@@ -156,6 +161,7 @@ export async function POST() {
         if (invoice.invoice_pdf) {
           const receipt = await prisma.receipt.create({
             data: {
+              companyId,
               imageUrl: invoice.invoice_pdf,
               fileName: `Stripe faktura - ${invoice.number || invoice.id}.pdf`,
               notes: `Stripe faktura ${invoice.number || ''} - ${invoice.customer_name || invoice.customer_email || 'Kunde'}`,
@@ -169,6 +175,7 @@ export async function POST() {
 
         await prisma.transaction.create({
           data: {
+            companyId,
             date: new Date(invoice.created * 1000),
             description: `Stripe faktura: ${invoice.number || invoice.id} - ${invoice.customer_name || invoice.customer_email || 'Kunde'}`,
             amount: invoice.amount_paid / 100,

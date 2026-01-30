@@ -19,6 +19,37 @@ async function main() {
 
   console.log('Created user:', user.email)
 
+  // Create default company for user
+  let company = await prisma.company.findFirst({
+    where: {
+      users: {
+        some: { userId: user.id },
+      },
+    },
+  })
+
+  if (!company) {
+    company = await prisma.company.create({
+      data: {
+        name: 'Mit Firma',
+        users: {
+          create: {
+            userId: user.id,
+            role: 'owner',
+          },
+        },
+      },
+    })
+
+    // Update user's active company
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { activeCompanyId: company.id },
+    })
+  }
+
+  console.log('Created company:', company.name)
+
   // Create default categories
   const categories = [
     // Income
@@ -42,9 +73,18 @@ async function main() {
 
   for (const cat of categories) {
     await prisma.category.upsert({
-      where: { name_type: { name: cat.name, type: cat.type } },
+      where: {
+        companyId_name_type: {
+          companyId: company.id,
+          name: cat.name,
+          type: cat.type,
+        },
+      },
       update: {},
-      create: cat,
+      create: {
+        companyId: company.id,
+        ...cat,
+      },
     })
   }
 

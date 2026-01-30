@@ -9,21 +9,36 @@ export type AppSettings = {
   emailWebhookSecret: string | null
 }
 
-let cachedSettings: AppSettings | null = null
-let cacheTime = 0
+// Cache by companyId
+const settingsCache = new Map<string, { settings: AppSettings; time: number }>()
 const CACHE_TTL = 60000 // 1 minute
 
-export async function getSettings(): Promise<AppSettings> {
+export async function getSettings(companyId?: string): Promise<AppSettings> {
   const now = Date.now()
 
-  // Return cached settings if still valid
-  if (cachedSettings && now - cacheTime < CACHE_TTL) {
-    return cachedSettings
+  // If no companyId provided, try to get settings from env vars only
+  if (!companyId) {
+    return {
+      stripeSecretKey: process.env.STRIPE_SECRET_KEY || null,
+      stripeWebhookSecret: process.env.STRIPE_WEBHOOK_SECRET || null,
+      googleCloudKey: process.env.GOOGLE_CLOUD_API_KEY || null,
+      emailAddress: null,
+      emailProvider: 'mailgun',
+      emailWebhookSecret: process.env.EMAIL_WEBHOOK_SECRET || null,
+    }
   }
 
-  const settings = await prisma.settings.findFirst()
+  // Return cached settings if still valid
+  const cached = settingsCache.get(companyId)
+  if (cached && now - cached.time < CACHE_TTL) {
+    return cached.settings
+  }
 
-  cachedSettings = {
+  const settings = await prisma.settings.findUnique({
+    where: { companyId },
+  })
+
+  const appSettings: AppSettings = {
     stripeSecretKey: settings?.stripeSecretKey || process.env.STRIPE_SECRET_KEY || null,
     stripeWebhookSecret: settings?.stripeWebhookSecret || process.env.STRIPE_WEBHOOK_SECRET || null,
     googleCloudKey: settings?.googleCloudKey || process.env.GOOGLE_CLOUD_API_KEY || null,
@@ -32,11 +47,14 @@ export async function getSettings(): Promise<AppSettings> {
     emailWebhookSecret: settings?.emailWebhookSecret || process.env.EMAIL_WEBHOOK_SECRET || null,
   }
 
-  cacheTime = now
-  return cachedSettings
+  settingsCache.set(companyId, { settings: appSettings, time: now })
+  return appSettings
 }
 
-export function clearSettingsCache() {
-  cachedSettings = null
-  cacheTime = 0
+export function clearSettingsCache(companyId?: string) {
+  if (companyId) {
+    settingsCache.delete(companyId)
+  } else {
+    settingsCache.clear()
+  }
 }

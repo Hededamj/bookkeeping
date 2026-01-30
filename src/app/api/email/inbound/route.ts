@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { getSettings } from '@/lib/settings'
 import crypto from 'crypto'
 
 // This webhook receives parsed emails from email services
@@ -10,9 +9,22 @@ export async function POST(request: NextRequest) {
   try {
     const contentType = request.headers.get('content-type') || ''
 
-    // Get settings for verification
-    const settings = await getSettings()
-    const webhookSecret = settings.emailWebhookSecret
+    // For email webhooks, we need to determine the company from the recipient email
+    // Get settings that match the recipient email or use the first company with email settings
+    const settingsWithEmail = await prisma.settings.findFirst({
+      where: {
+        emailAddress: { not: null },
+      },
+      include: { company: true },
+    })
+
+    if (!settingsWithEmail) {
+      console.log('No company configured for email ingestion')
+      return NextResponse.json({ error: 'No company configured' }, { status: 400 })
+    }
+
+    const companyId = settingsWithEmail.companyId
+    const webhookSecret = settingsWithEmail.emailWebhookSecret
 
     let attachments: Array<{
       filename: string
@@ -118,6 +130,7 @@ export async function POST(request: NextRequest) {
 
       const receipt = await prisma.receipt.create({
         data: {
+          companyId,
           imageUrl: dataUrl,
           fileName: attachment.filename,
           notes: `Modtaget via email fra ${sender}${subject ? `: ${subject}` : ''}`,
@@ -127,12 +140,13 @@ export async function POST(request: NextRequest) {
       receipts.push(receipt)
 
       // Trigger OCR processing asynchronously
-      processOCR(receipt.id, attachment.content).catch(console.error)
+      processOCR(receipt.id, attachment.content, companyId).catch(console.error)
     }
 
     // Log the email
     await prisma.emailLog.create({
       data: {
+        companyId,
         sender,
         subject,
         attachmentCount: attachments.length,
@@ -169,10 +183,12 @@ function isImageOrPdf(contentType: string): boolean {
   )
 }
 
-async function processOCR(receiptId: string, base64Image: string) {
+async function processOCR(receiptId: string, base64Image: string, companyId: string) {
   // Get API key from settings
-  const settings = await getSettings()
-  const apiKey = settings.googleCloudKey
+  const settings = await prisma.settings.findUnique({
+    where: { companyId },
+  })
+  const apiKey = settings?.googleCloudKey || process.env.GOOGLE_CLOUD_API_KEY
 
   if (!apiKey) {
     console.log('Google Cloud API key not configured, skipping OCR')

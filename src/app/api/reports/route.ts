@@ -1,11 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getServerSession } from 'next-auth'
-import { authOptions } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
+import { getCompanyContext } from '@/lib/company'
 
 export async function GET(request: NextRequest) {
-  const session = await getServerSession(authOptions)
-  if (!session) {
+  const context = await getCompanyContext()
+  if (!context) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
@@ -25,9 +24,10 @@ export async function GET(request: NextRequest) {
     endDate = new Date(year, 11, 31, 23, 59, 59, 999)
   }
 
-  // Get all transactions in period
+  // Get all transactions in period for this company
   const transactions = await prisma.transaction.findMany({
     where: {
+      companyId: context.companyId,
       date: {
         gte: startDate,
         lte: endDate,

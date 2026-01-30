@@ -1,30 +1,38 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getServerSession } from 'next-auth'
-import { authOptions } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
+import { suggestVendorName } from '@/lib/vendor-matcher'
+import { getCompanyContext } from '@/lib/company'
 
 export async function GET() {
-  const session = await getServerSession(authOptions)
-  if (!session) {
+  const context = await getCompanyContext()
+  if (!context) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
   const transactions = await prisma.transaction.findMany({
+    where: { companyId: context.companyId },
     orderBy: { date: 'desc' },
     include: {
       category: true,
+      vendor: true,
       receipt: {
         select: { id: true },
       },
     },
   })
 
-  return NextResponse.json(transactions)
+  // Add suggested vendor name for transactions without a vendor
+  const transactionsWithSuggestions = transactions.map(tx => ({
+    ...tx,
+    suggestedVendor: !tx.vendor ? suggestVendorName(tx.description) : null,
+  }))
+
+  return NextResponse.json(transactionsWithSuggestions)
 }
 
 export async function POST(request: NextRequest) {
-  const session = await getServerSession(authOptions)
-  if (!session) {
+  const context = await getCompanyContext()
+  if (!context) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
@@ -33,6 +41,7 @@ export async function POST(request: NextRequest) {
 
   const transaction = await prisma.transaction.create({
     data: {
+      companyId: context.companyId,
       date: new Date(date),
       description,
       amount,

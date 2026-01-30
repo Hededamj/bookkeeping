@@ -18,6 +18,7 @@ import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { signOut } from 'next-auth/react'
 import { useState } from 'react'
+import { CompanySwitcher } from '@/components/company-switcher'
 
 const navigation = [
   { name: 'Dashboard', href: '/', icon: LayoutDashboard },
@@ -63,6 +64,11 @@ export function Sidebar() {
         <div className="flex h-16 items-center border-b px-6">
           <FileText className="h-6 w-6 text-primary" />
           <span className="ml-2 text-lg font-semibold">Bogføring</span>
+        </div>
+
+        {/* Company switcher */}
+        <div className="border-b">
+          <CompanySwitcher />
         </div>
 
         <nav className="flex-1 space-y-1 px-3 py-4">

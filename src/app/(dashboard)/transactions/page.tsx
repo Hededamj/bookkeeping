@@ -30,7 +30,13 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog'
 import { formatCurrency, formatDate } from '@/lib/utils'
-import { Search, Filter, CheckCircle2, Clock, Receipt } from 'lucide-react'
+import { Search, Filter, CheckCircle2, Clock, Receipt, Store, Pencil } from 'lucide-react'
+import { Label } from '@/components/ui/label'
+
+type Vendor = {
+  id: string
+  name: string
+}
 
 type Transaction = {
   id: string
@@ -40,6 +46,8 @@ type Transaction = {
   source: string
   matched: boolean
   category: { id: string; name: string; type: string } | null
+  vendor: Vendor | null
+  suggestedVendor: string | null
   receipt: { id: string } | null
 }
 
@@ -57,10 +65,15 @@ export default function TransactionsPage() {
   const [filterMatched, setFilterMatched] = useState<string>('all')
   const [selectedTransaction, setSelectedTransaction] = useState<Transaction | null>(null)
   const [categoryDialogOpen, setCategoryDialogOpen] = useState(false)
+  const [vendorDialogOpen, setVendorDialogOpen] = useState(false)
+  const [vendorName, setVendorName] = useState('')
+  const [savingVendor, setSavingVendor] = useState(false)
+  const [vendors, setVendors] = useState<Vendor[]>([])
 
   useEffect(() => {
     fetchTransactions()
     fetchCategories()
+    fetchVendors()
   }, [])
 
   const fetchTransactions = async () => {
@@ -83,6 +96,58 @@ export default function TransactionsPage() {
     } catch (error) {
       console.error('Failed to fetch categories:', error)
     }
+  }
+
+  const fetchVendors = async () => {
+    try {
+      const res = await fetch('/api/vendors')
+      const data = await res.json()
+      setVendors(data)
+    } catch (error) {
+      console.error('Failed to fetch vendors:', error)
+    }
+  }
+
+  const updateVendor = async (transactionId: string, newVendorName: string) => {
+    setSavingVendor(true)
+    try {
+      await fetch(`/api/transactions/${transactionId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ vendorName: newVendorName }),
+      })
+      fetchTransactions()
+      fetchVendors()
+      setVendorDialogOpen(false)
+      setVendorName('')
+    } catch (error) {
+      console.error('Failed to update vendor:', error)
+    } finally {
+      setSavingVendor(false)
+    }
+  }
+
+  const selectExistingVendor = async (transactionId: string, vendorId: string) => {
+    setSavingVendor(true)
+    try {
+      await fetch(`/api/transactions/${transactionId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ vendorId }),
+      })
+      fetchTransactions()
+      setVendorDialogOpen(false)
+    } catch (error) {
+      console.error('Failed to update vendor:', error)
+    } finally {
+      setSavingVendor(false)
+    }
+  }
+
+  const openVendorDialog = (tx: Transaction) => {
+    setSelectedTransaction(tx)
+    setVendorName(tx.vendor?.name || tx.suggestedVendor || '')
+    setVendorDialogOpen(true)
   }
 
   const updateCategory = async (transactionId: string, categoryId: string) => {
@@ -168,6 +233,7 @@ export default function TransactionsPage() {
                     <TableHead className="w-[50px]">Status</TableHead>
                     <TableHead>Dato</TableHead>
                     <TableHead>Beskrivelse</TableHead>
+                    <TableHead>Leverandør</TableHead>
                     <TableHead>Kategori</TableHead>
                     <TableHead className="text-right">Beløb</TableHead>
                     <TableHead className="w-[100px]">Handlinger</TableHead>
@@ -188,6 +254,26 @@ export default function TransactionsPage() {
                       </TableCell>
                       <TableCell>
                         <div className="max-w-[300px] truncate">{tx.description}</div>
+                      </TableCell>
+                      <TableCell>
+                        <button
+                          onClick={() => openVendorDialog(tx)}
+                          className="flex items-center gap-1 hover:text-primary transition-colors text-left"
+                        >
+                          {tx.vendor ? (
+                            <>
+                              <Store className="h-3 w-3 text-green-500 flex-shrink-0" />
+                              <span className="truncate max-w-[120px]">{tx.vendor.name}</span>
+                            </>
+                          ) : (
+                            <>
+                              <Pencil className="h-3 w-3 text-muted-foreground flex-shrink-0" />
+                              <span className="truncate max-w-[120px] text-muted-foreground italic">
+                                {tx.suggestedVendor || 'Ukendt'}
+                              </span>
+                            </>
+                          )}
+                        </button>
                       </TableCell>
                       <TableCell>
                         {tx.category ? (
@@ -252,6 +338,67 @@ export default function TransactionsPage() {
               </Button>
             ))}
           </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Vendor dialog */}
+      <Dialog open={vendorDialogOpen} onOpenChange={setVendorDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Rediger leverandør</DialogTitle>
+            <DialogDescription>
+              Angiv eller ret leverandørnavnet. Systemet lærer automatisk at genkende lignende transaktioner.
+            </DialogDescription>
+          </DialogHeader>
+          {selectedTransaction && (
+            <div className="space-y-4">
+              <div className="rounded-md bg-muted p-3 text-sm">
+                <p className="font-medium">Transaktionsbeskrivelse:</p>
+                <p className="text-muted-foreground">{selectedTransaction.description}</p>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="vendorName">Leverandørnavn</Label>
+                <Input
+                  id="vendorName"
+                  value={vendorName}
+                  onChange={(e) => setVendorName(e.target.value)}
+                  placeholder="F.eks. Meta, Google, Adobe..."
+                />
+              </div>
+
+              {vendors.length > 0 && (
+                <div className="space-y-2">
+                  <Label>Eller vælg eksisterende leverandør</Label>
+                  <div className="flex flex-wrap gap-2">
+                    {vendors.slice(0, 10).map((v) => (
+                      <Button
+                        key={v.id}
+                        variant="outline"
+                        size="sm"
+                        disabled={savingVendor}
+                        onClick={() => selectExistingVendor(selectedTransaction.id, v.id)}
+                      >
+                        {v.name}
+                      </Button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setVendorDialogOpen(false)}>
+                  Annuller
+                </Button>
+                <Button
+                  onClick={() => updateVendor(selectedTransaction.id, vendorName)}
+                  disabled={!vendorName.trim() || savingVendor}
+                >
+                  {savingVendor ? 'Gemmer...' : 'Gem leverandør'}
+                </Button>
+              </DialogFooter>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </div>

@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { hash } from 'bcryptjs'
 import { prisma } from '@/lib/prisma'
+import { createCompany } from '@/lib/company'
 
 export async function POST(request: NextRequest) {
   try {
-    const { email, password, name } = await request.json()
+    const { email, password, name, companyName } = await request.json()
 
     if (!email || !password) {
       return NextResponse.json(
@@ -36,6 +37,10 @@ export async function POST(request: NextRequest) {
         name,
       },
     })
+
+    // Create default company for the user
+    const defaultCompanyName = companyName || name || email.split('@')[0]
+    await createCompany(user.id, defaultCompanyName)
 
     return NextResponse.json({
       id: user.id,

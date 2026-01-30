@@ -1,12 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getServerSession } from 'next-auth'
-import { authOptions } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import { getSettings } from '@/lib/settings'
+import { getCompanyContext } from '@/lib/company'
 
 export async function POST(request: NextRequest) {
-  const session = await getServerSession(authOptions)
-  if (!session) {
+  const context = await getCompanyContext()
+  if (!context) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
@@ -28,25 +27,21 @@ export async function POST(request: NextRequest) {
     // Create receipt record
     const receipt = await prisma.receipt.create({
       data: {
+        companyId: context.companyId,
         imageUrl: dataUrl,
         fileName: file.name,
       },
     })
 
-    // Trigger OCR processing asynchronously (for images)
-    // PDF OCR requires different handling
+    // Trigger OCR processing asynchronously
     const isPdf = mimeType === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')
 
-    if (!isPdf) {
-      processOCR(receipt.id, base64, mimeType).catch(console.error)
+    if (isPdf) {
+      // For PDFs, extract text using pdf-parse
+      processPdfOCR(receipt.id, buffer).catch(console.error)
     } else {
-      // For PDFs, mark that OCR is pending (needs manual review or PDF-specific processing)
-      await prisma.receipt.update({
-        where: { id: receipt.id },
-        data: {
-          notes: 'PDF uploadet - OCR kræver manuel gennemgang eller Google Document AI'
-        }
-      })
+      // For images, use Google Vision API
+      processOCR(receipt.id, base64, context.companyId).catch(console.error)
     }
 
     return NextResponse.json(receipt)
@@ -59,9 +54,9 @@ export async function POST(request: NextRequest) {
   }
 }
 
-async function processOCR(receiptId: string, base64Image: string, mimeType: string) {
+async function processOCR(receiptId: string, base64Image: string, companyId: string) {
   // Get API key from settings
-  const settings = await getSettings()
+  const settings = await getSettings(companyId)
   const apiKey = settings.googleCloudKey
 
   if (!apiKey) {
@@ -120,5 +115,94 @@ async function processOCR(receiptId: string, base64Image: string, mimeType: stri
     })
   } catch (error) {
     console.error('OCR processing error:', error)
+  }
+}
+
+async function processPdfOCR(receiptId: string, pdfBuffer: Buffer) {
+  try {
+    // Dynamic import to avoid build issues
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const pdfParse = require('pdf-parse/lib/pdf-parse')
+    const data = await pdfParse(pdfBuffer)
+    const text = data.text || ''
+
+    if (!text.trim()) {
+      console.log('No text found in PDF, may be scanned document')
+      await prisma.receipt.update({
+        where: { id: receiptId },
+        data: {
+          notes: 'PDF uden indlejret tekst - kan være scannet billede'
+        }
+      })
+      return
+    }
+
+    // Extract amount (Danish format)
+    const amountMatch = text.match(/(?:Total|Sum|I alt|Beløb|Amount)[:\s]*(\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{2}))/i) ||
+                       text.match(/(\d{1,3}(?:[.,]\d{3})*[.,]\d{2})\s*(?:kr|DKK)/i) ||
+                       text.match(/(?:DKK|EUR|USD)\s*(\d{1,3}(?:[.,]\d{3})*[.,]\d{2})/i)
+    const amount = amountMatch ? parseFloat(amountMatch[1].replace(/\./g, '').replace(',', '.')) : null
+
+    // Extract date (Danish format DD-MM-YYYY or DD/MM/YYYY)
+    const dateMatch = text.match(/(\d{1,2})[./-](\d{1,2})[./-](\d{2,4})/)
+    let date: Date | null = null
+    if (dateMatch) {
+      const day = parseInt(dateMatch[1])
+      const month = parseInt(dateMatch[2]) - 1
+      let year = parseInt(dateMatch[3])
+      if (year < 100) year += 2000
+      date = new Date(year, month, day)
+    }
+
+    // Try to extract vendor name
+    // Look for common patterns like "Fra:", company names, etc.
+    const lines = text.split('\n').filter((l: string) => l.trim())
+    let vendor: string | null = null
+
+    // Try to find company name patterns
+    const companyPatterns = [
+      /(?:Fra|From|Afsender|Sender)[:\s]*(.+)/i,
+      /(?:Faktura fra|Invoice from)[:\s]*(.+)/i,
+    ]
+
+    for (const pattern of companyPatterns) {
+      const match = text.match(pattern)
+      if (match && match[1]) {
+        vendor = match[1].trim().substring(0, 100)
+        break
+      }
+    }
+
+    // Fallback: use first non-empty line that looks like a company name
+    if (!vendor && lines.length > 0) {
+      for (const line of lines.slice(0, 5)) {
+        const trimmed = line.trim()
+        // Skip lines that look like dates or numbers
+        if (trimmed.length > 3 && trimmed.length < 60 && !/^\d+[./-]\d+[./-]\d+$/.test(trimmed)) {
+          vendor = trimmed
+          break
+        }
+      }
+    }
+
+    await prisma.receipt.update({
+      where: { id: receiptId },
+      data: {
+        ocrText: text.substring(0, 10000), // Limit text length
+        ocrAmount: amount,
+        ocrDate: date,
+        ocrVendor: vendor,
+      },
+    })
+
+    console.log(`PDF OCR completed for receipt ${receiptId}:`, { amount, date, vendor: vendor?.substring(0, 30) })
+  } catch (error) {
+    console.error('PDF OCR processing error:', error)
+    await prisma.receipt.update({
+      where: { id: receiptId },
+      data: {
+        notes: 'Fejl ved PDF-tekstudtrækning'
+      }
+    })
   }
 }

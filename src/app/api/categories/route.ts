@@ -1,15 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getServerSession } from 'next-auth'
-import { authOptions } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
+import { getCompanyContext } from '@/lib/company'
 
 export async function GET() {
-  const session = await getServerSession(authOptions)
-  if (!session) {
+  const context = await getCompanyContext()
+  if (!context) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
   const categories = await prisma.category.findMany({
+    where: { companyId: context.companyId },
     orderBy: [{ type: 'asc' }, { name: 'asc' }],
   })
 
@@ -17,8 +17,8 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
-  const session = await getServerSession(authOptions)
-  if (!session) {
+  const context = await getCompanyContext()
+  if (!context) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
@@ -27,6 +27,7 @@ export async function POST(request: NextRequest) {
 
   const category = await prisma.category.create({
     data: {
+      companyId: context.companyId,
       name,
       type,
       keywords: keywords || [],

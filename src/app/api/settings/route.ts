@@ -1,21 +1,25 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getServerSession } from 'next-auth'
-import { authOptions } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
+import { getCompanyContext } from '@/lib/company'
+import { clearSettingsCache } from '@/lib/settings'
 
 export async function GET() {
-  const session = await getServerSession(authOptions)
-  if (!session) {
+  const context = await getCompanyContext()
+  if (!context) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  // Get or create settings
-  let settings = await prisma.settings.findFirst()
+  // Get or create settings for this company
+  let settings = await prisma.settings.findUnique({
+    where: { companyId: context.companyId },
+  })
   if (!settings) {
-    settings = await prisma.settings.create({ data: {} })
+    settings = await prisma.settings.create({
+      data: { companyId: context.companyId },
+    })
   }
 
-  // Get recent email logs
+  // Get recent email logs for this company
   let emailLogs: Array<{
     id: string
     sender: string
@@ -26,6 +30,7 @@ export async function GET() {
 
   try {
     emailLogs = await prisma.emailLog.findMany({
+      where: { companyId: context.companyId },
       take: 10,
       orderBy: { processedAt: 'desc' },
     })
@@ -56,8 +61,8 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
-  const session = await getServerSession(authOptions)
-  if (!session) {
+  const context = await getCompanyContext()
+  if (!context) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
@@ -71,8 +76,10 @@ export async function POST(request: NextRequest) {
     emailWebhookSecret,
   } = body
 
-  // Get or create settings
-  let settings = await prisma.settings.findFirst()
+  // Get or create settings for this company
+  let settings = await prisma.settings.findUnique({
+    where: { companyId: context.companyId },
+  })
 
   const updateData: Record<string, string | null> = {}
 
@@ -97,13 +104,18 @@ export async function POST(request: NextRequest) {
   }
 
   if (!settings) {
-    settings = await prisma.settings.create({ data: updateData })
+    settings = await prisma.settings.create({
+      data: { companyId: context.companyId, ...updateData },
+    })
   } else {
     settings = await prisma.settings.update({
       where: { id: settings.id },
       data: updateData,
     })
   }
+
+  // Clear settings cache for this company
+  clearSettingsCache(context.companyId)
 
   return NextResponse.json({ success: true })
 }

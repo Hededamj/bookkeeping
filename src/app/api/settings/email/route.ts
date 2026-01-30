@@ -1,21 +1,24 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getServerSession } from 'next-auth'
-import { authOptions } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
+import { getCompanyContext } from '@/lib/company'
 
 export async function GET() {
-  const session = await getServerSession(authOptions)
-  if (!session) {
+  const context = await getCompanyContext()
+  if (!context) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  // Get or create settings
-  let settings = await prisma.settings.findFirst()
+  // Get or create settings for this company
+  let settings = await prisma.settings.findUnique({
+    where: { companyId: context.companyId },
+  })
   if (!settings) {
-    settings = await prisma.settings.create({ data: {} })
+    settings = await prisma.settings.create({
+      data: { companyId: context.companyId },
+    })
   }
 
-  // Get recent email logs
+  // Get recent email logs for this company
   let logs: Array<{
     id: string
     sender: string
@@ -26,6 +29,7 @@ export async function GET() {
 
   try {
     logs = await prisma.emailLog.findMany({
+      where: { companyId: context.companyId },
       take: 10,
       orderBy: { processedAt: 'desc' },
     })
@@ -41,18 +45,20 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
-  const session = await getServerSession(authOptions)
-  if (!session) {
+  const context = await getCompanyContext()
+  if (!context) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
   const { emailAddress, emailProvider } = await request.json()
 
-  // Get or create settings
-  let settings = await prisma.settings.findFirst()
+  // Get or create settings for this company
+  let settings = await prisma.settings.findUnique({
+    where: { companyId: context.companyId },
+  })
   if (!settings) {
     settings = await prisma.settings.create({
-      data: { emailAddress, emailProvider },
+      data: { companyId: context.companyId, emailAddress, emailProvider },
     })
   } else {
     settings = await prisma.settings.update({

@@ -1,19 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getServerSession } from 'next-auth'
-import { authOptions } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
+import { getCompanyContext } from '@/lib/company'
 
 export async function GET(request: NextRequest) {
-  const session = await getServerSession(authOptions)
-  if (!session) {
+  const context = await getCompanyContext()
+  if (!context) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
   const searchParams = request.nextUrl.searchParams
   const year = searchParams.get('year') ? parseInt(searchParams.get('year')!) : null
 
-  // Get all transactions (filtered by year if specified)
-  const whereClause: { date?: { gte: Date; lte: Date }; amount?: { lt: number } } = {}
+  // Get all transactions (filtered by year if specified) for this company
+  const whereClause: { companyId: string; date?: { gte: Date; lte: Date }; amount?: { lt: number } } = {
+    companyId: context.companyId,
+  }
 
   if (year) {
     whereClause.date = {
