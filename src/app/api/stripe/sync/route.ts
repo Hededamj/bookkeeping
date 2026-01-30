@@ -52,11 +52,47 @@ export async function POST() {
       // Check if already imported
       const existing = await prisma.transaction.findFirst({
         where: { externalId: charge.id },
+        include: { receipt: true },
       })
 
-      if (existing) continue
+      if (existing) {
+        // If transaction exists but has no receipt, try to add one
+        if (!existing.receipt && charge.receipt_url) {
+          const receipt = await prisma.receipt.create({
+            data: {
+              imageUrl: charge.receipt_url,
+              fileName: `Stripe kvittering - ${charge.id}.html`,
+              notes: `Stripe kvittering for ${charge.billing_details?.name || 'betaling'}`,
+              ocrAmount: charge.amount / 100,
+              ocrDate: new Date(charge.created * 1000),
+              ocrVendor: charge.billing_details?.name || 'Stripe',
+            },
+          })
+          await prisma.transaction.update({
+            where: { id: existing.id },
+            data: { receiptId: receipt.id, matched: true },
+          })
+        }
+        continue
+      }
 
-      // Create transaction
+      // Create receipt if receipt_url exists
+      let receiptId: string | null = null
+      if (charge.receipt_url) {
+        const receipt = await prisma.receipt.create({
+          data: {
+            imageUrl: charge.receipt_url,
+            fileName: `Stripe kvittering - ${charge.id}.html`,
+            notes: `Stripe kvittering for ${charge.billing_details?.name || 'betaling'}`,
+            ocrAmount: charge.amount / 100,
+            ocrDate: new Date(charge.created * 1000),
+            ocrVendor: charge.billing_details?.name || 'Stripe',
+          },
+        })
+        receiptId = receipt.id
+      }
+
+      // Create transaction with linked receipt
       await prisma.transaction.create({
         data: {
           date: new Date(charge.created * 1000),
@@ -64,10 +100,87 @@ export async function POST() {
           amount: charge.amount / 100, // Stripe amounts are in cents
           source: 'STRIPE',
           externalId: charge.id,
+          receiptId: receiptId,
+          matched: !!receiptId,
         },
       })
 
       imported++
+    }
+
+    // Fetch invoices (with PDF receipts)
+    const invoicesResponse = await fetch(
+      'https://api.stripe.com/v1/invoices?limit=100&status=paid',
+      {
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+        },
+      }
+    )
+
+    if (invoicesResponse.ok) {
+      const invoicesData = await invoicesResponse.json()
+      const invoices = invoicesData.data || []
+
+      for (const invoice of invoices) {
+        const invoiceExternalId = `invoice_${invoice.id}`
+
+        const existing = await prisma.transaction.findFirst({
+          where: { externalId: invoiceExternalId },
+          include: { receipt: true },
+        })
+
+        if (existing) {
+          // Add receipt if missing
+          if (!existing.receipt && invoice.invoice_pdf) {
+            const receipt = await prisma.receipt.create({
+              data: {
+                imageUrl: invoice.invoice_pdf,
+                fileName: `Stripe faktura - ${invoice.number || invoice.id}.pdf`,
+                notes: `Stripe faktura ${invoice.number || ''} - ${invoice.customer_name || invoice.customer_email || 'Kunde'}`,
+                ocrAmount: invoice.amount_paid / 100,
+                ocrDate: new Date(invoice.created * 1000),
+                ocrVendor: invoice.customer_name || invoice.customer_email || 'Stripe kunde',
+              },
+            })
+            await prisma.transaction.update({
+              where: { id: existing.id },
+              data: { receiptId: receipt.id, matched: true },
+            })
+          }
+          continue
+        }
+
+        // Create receipt from invoice PDF
+        let receiptId: string | null = null
+        if (invoice.invoice_pdf) {
+          const receipt = await prisma.receipt.create({
+            data: {
+              imageUrl: invoice.invoice_pdf,
+              fileName: `Stripe faktura - ${invoice.number || invoice.id}.pdf`,
+              notes: `Stripe faktura ${invoice.number || ''} - ${invoice.customer_name || invoice.customer_email || 'Kunde'}`,
+              ocrAmount: invoice.amount_paid / 100,
+              ocrDate: new Date(invoice.created * 1000),
+              ocrVendor: invoice.customer_name || invoice.customer_email || 'Stripe kunde',
+            },
+          })
+          receiptId = receipt.id
+        }
+
+        await prisma.transaction.create({
+          data: {
+            date: new Date(invoice.created * 1000),
+            description: `Stripe faktura: ${invoice.number || invoice.id} - ${invoice.customer_name || invoice.customer_email || 'Kunde'}`,
+            amount: invoice.amount_paid / 100,
+            source: 'STRIPE',
+            externalId: invoiceExternalId,
+            receiptId: receiptId,
+            matched: !!receiptId,
+          },
+        })
+
+        imported++
+      }
     }
 
     // Also fetch payouts (bank transfers)
@@ -96,8 +209,8 @@ export async function POST() {
         await prisma.transaction.create({
           data: {
             date: new Date(payout.arrival_date * 1000),
-            description: `Stripe udbetaling`,
-            amount: -(payout.amount / 100), // Negative because money leaving Stripe
+            description: `Stripe udbetaling til bank`,
+            amount: payout.amount / 100, // Positive - money arriving in bank account
             source: 'STRIPE',
             externalId: `payout_${payout.id}`,
           },
