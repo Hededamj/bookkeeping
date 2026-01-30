@@ -13,7 +13,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { formatCurrency, formatDate } from '@/lib/utils'
-import { Upload, Camera, Search, Image as ImageIcon, Loader2, X, FileText, Trash2 } from 'lucide-react'
+import { Upload, Camera, Search, Image as ImageIcon, Loader2, X, FileText, Trash2, AlertCircle, CheckCircle2, Clock, RefreshCw } from 'lucide-react'
 
 // Helper to check if URL is a PDF
 const isPdf = (url: string, fileName: string | null): boolean => {
@@ -23,10 +23,30 @@ const isPdf = (url: string, fileName: string | null): boolean => {
   return false
 }
 
+// OCR status helper
+const getOcrStatusInfo = (status: string) => {
+  switch (status) {
+    case 'pending':
+      return { label: 'Venter', icon: Clock, variant: 'secondary' as const, color: 'text-yellow-500' }
+    case 'processing':
+      return { label: 'Behandler', icon: RefreshCw, variant: 'secondary' as const, color: 'text-blue-500' }
+    case 'completed':
+      return { label: 'Færdig', icon: CheckCircle2, variant: 'success' as const, color: 'text-green-500' }
+    case 'failed':
+      return { label: 'Fejlet', icon: AlertCircle, variant: 'destructive' as const, color: 'text-red-500' }
+    case 'no_api_key':
+      return { label: 'Mangler API-nøgle', icon: AlertCircle, variant: 'warning' as const, color: 'text-orange-500' }
+    default:
+      return { label: status, icon: Clock, variant: 'secondary' as const, color: 'text-gray-500' }
+  }
+}
+
 type Receipt = {
   id: string
   imageUrl: string
   fileName: string | null
+  ocrStatus: string
+  ocrError: string | null
   ocrText: string | null
   ocrAmount: string | null
   ocrDate: string | null
@@ -296,15 +316,25 @@ export default function ReceiptsPage() {
                         </p>
                       )}
                     </div>
-                    {receipt.transactions.length > 0 ? (
-                      <Badge variant="success" className="mt-2">
-                        Matchet
-                      </Badge>
-                    ) : (
-                      <Badge variant="warning" className="mt-2">
-                        Ikke matchet
-                      </Badge>
-                    )}
+                    <div className="mt-2 flex gap-1 flex-wrap">
+                      {receipt.ocrStatus !== 'completed' && (
+                        (() => {
+                          const statusInfo = getOcrStatusInfo(receipt.ocrStatus)
+                          const StatusIcon = statusInfo.icon
+                          return (
+                            <Badge variant={statusInfo.variant} className="text-xs">
+                              <StatusIcon className={`mr-1 h-3 w-3 ${receipt.ocrStatus === 'processing' ? 'animate-spin' : ''}`} />
+                              OCR: {statusInfo.label}
+                            </Badge>
+                          )
+                        })()
+                      )}
+                      {receipt.transactions.length > 0 ? (
+                        <Badge variant="success">Matchet</Badge>
+                      ) : (
+                        <Badge variant="warning">Ikke matchet</Badge>
+                      )}
+                    </div>
                   </div>
                 </div>
               ))}
@@ -381,7 +411,25 @@ export default function ReceiptsPage() {
                   </div>
                 )}
                 <div>
-                  <p className="text-sm text-muted-foreground">Status</p>
+                  <p className="text-sm text-muted-foreground">OCR Status</p>
+                  {(() => {
+                    const statusInfo = getOcrStatusInfo(selectedReceipt.ocrStatus)
+                    const StatusIcon = statusInfo.icon
+                    return (
+                      <div className="flex items-center gap-2">
+                        <Badge variant={statusInfo.variant}>
+                          <StatusIcon className={`mr-1 h-3 w-3 ${selectedReceipt.ocrStatus === 'processing' ? 'animate-spin' : ''}`} />
+                          {statusInfo.label}
+                        </Badge>
+                      </div>
+                    )
+                  })()}
+                  {selectedReceipt.ocrError && (
+                    <p className="mt-1 text-sm text-red-600">{selectedReceipt.ocrError}</p>
+                  )}
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground">Match Status</p>
                   {selectedReceipt.transactions.length > 0 ? (
                     <Badge variant="success">
                       Matchet med {selectedReceipt.transactions.length} transaktion(er)

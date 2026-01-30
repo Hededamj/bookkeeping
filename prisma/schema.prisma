@@ -87,6 +87,8 @@ model Receipt {
   company      Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
   imageUrl     String
   fileName     String?
+  ocrStatus    String        @default("pending") // pending, processing, completed, failed, no_api_key
+  ocrError     String?
   ocrText      String?
   ocrAmount    Decimal?      @db.Decimal(12, 2)
   ocrDate      DateTime?
@@ -101,6 +103,7 @@ model Receipt {
   @@index([companyId])
   @@index([categoryId])
   @@index([ocrDate])
+  @@index([ocrStatus])
 }
 
 model Category {
