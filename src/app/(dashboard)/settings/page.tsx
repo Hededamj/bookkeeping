@@ -277,7 +277,24 @@ export default function SettingsPage() {
   }
 
   const updateSetting = (key: keyof AppSettings, value: string) => {
-    setSettings((prev) => ({ ...prev, [key]: value }))
+    // If the current value is masked (contains •) and user is typing a new value,
+    // clear it first so they can enter a fresh key
+    setSettings((prev) => {
+      const currentValue = prev[key]
+      if (typeof currentValue === 'string' && currentValue.includes('•') && !value.includes('•')) {
+        // User is typing a new value, don't append to masked value
+        return { ...prev, [key]: value }
+      }
+      return { ...prev, [key]: value }
+    })
+  }
+
+  // Clear masked field when user clicks on it
+  const handleKeyFieldFocus = (key: keyof AppSettings) => {
+    const currentValue = settings[key]
+    if (typeof currentValue === 'string' && currentValue.includes('•')) {
+      setSettings((prev) => ({ ...prev, [key]: '' }))
+    }
   }
 
   return (
@@ -336,6 +353,7 @@ export default function SettingsPage() {
                         type={showStripeKey ? 'text' : 'password'}
                         placeholder="sk_live_..."
                         value={settings.stripeSecretKey}
+                        onFocus={() => handleKeyFieldFocus('stripeSecretKey')}
                         onChange={(e) => updateSetting('stripeSecretKey', e.target.value)}
                       />
                       <Button
@@ -355,6 +373,7 @@ export default function SettingsPage() {
                         type={showStripeWebhook ? 'text' : 'password'}
                         placeholder="whsec_..."
                         value={settings.stripeWebhookSecret}
+                        onFocus={() => handleKeyFieldFocus('stripeWebhookSecret')}
                         onChange={(e) => updateSetting('stripeWebhookSecret', e.target.value)}
                       />
                       <Button
@@ -417,6 +436,7 @@ export default function SettingsPage() {
                       type={showGoogleKey ? 'text' : 'password'}
                       placeholder="AIza..."
                       value={settings.googleCloudKey}
+                      onFocus={() => handleKeyFieldFocus('googleCloudKey')}
                       onChange={(e) => updateSetting('googleCloudKey', e.target.value)}
                       className="max-w-md"
                     />
@@ -687,6 +707,7 @@ export default function SettingsPage() {
                       type={showEmailSecret ? 'text' : 'password'}
                       placeholder="Din webhook signing secret"
                       value={settings.emailWebhookSecret}
+                      onFocus={() => handleKeyFieldFocus('emailWebhookSecret')}
                       onChange={(e) => updateSetting('emailWebhookSecret', e.target.value)}
                       className="max-w-md"
                     />

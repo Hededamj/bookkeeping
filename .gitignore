@@ -40,3 +40,6 @@ prisma/migrations/
 # IDE
 .idea
 .vscode
+
+.vercel
+.env*.local
