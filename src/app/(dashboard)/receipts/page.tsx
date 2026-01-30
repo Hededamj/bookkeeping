@@ -61,6 +61,7 @@ export default function ReceiptsPage() {
   const [loading, setLoading] = useState(true)
   const [uploading, setUploading] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const [retrying, setRetrying] = useState(false)
   const [search, setSearch] = useState('')
   const [selectedReceipt, setSelectedReceipt] = useState<Receipt | null>(null)
   const [dragActive, setDragActive] = useState(false)
@@ -68,6 +69,28 @@ export default function ReceiptsPage() {
   useEffect(() => {
     fetchReceipts()
   }, [])
+
+  const retryOcr = async (id: string) => {
+    setRetrying(true)
+    try {
+      const res = await fetch(`/api/receipts/${id}/ocr`, { method: 'POST' })
+      if (res.ok) {
+        // Refresh after a short delay to allow OCR to process
+        setTimeout(() => {
+          fetchReceipts()
+          if (selectedReceipt?.id === id) {
+            fetch(`/api/receipts/${id}`).then(r => r.json()).then(data => {
+              setSelectedReceipt(data)
+            })
+          }
+        }, 2000)
+      }
+    } catch (error) {
+      console.error('Retry OCR error:', error)
+    } finally {
+      setRetrying(false)
+    }
+  }
 
   const deleteReceipt = async (id: string) => {
     if (!confirm('Er du sikker på at du vil slette dette bilag?')) return
@@ -276,63 +299,56 @@ export default function ReceiptsPage() {
               <p className="text-muted-foreground">Ingen bilag fundet</p>
             </div>
           ) : (
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            <div className="grid gap-3 grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
               {filteredReceipts.map((receipt) => (
                 <div
                   key={receipt.id}
                   className="group relative cursor-pointer overflow-hidden rounded-lg border bg-muted/50 transition-all hover:shadow-md"
                   onClick={() => setSelectedReceipt(receipt)}
                 >
-                  <div className="aspect-[3/4] overflow-hidden">
+                  <div className="aspect-square overflow-hidden">
                     {isPdf(receipt.imageUrl, receipt.fileName) ? (
                       <div className="flex h-full w-full flex-col items-center justify-center bg-muted">
-                        <FileText className="h-16 w-16 text-red-500" />
-                        <p className="mt-2 text-sm font-medium text-muted-foreground">PDF</p>
-                        <p className="mt-1 max-w-[80%] truncate text-xs text-muted-foreground">
-                          {receipt.fileName}
-                        </p>
+                        <FileText className="h-8 w-8 text-red-500" />
+                        <p className="mt-1 text-xs font-medium text-muted-foreground">PDF</p>
                       </div>
                     ) : (
                       <img
                         src={receipt.imageUrl}
                         alt={receipt.fileName || 'Bilag'}
                         className="h-full w-full object-cover transition-transform group-hover:scale-105"
+                        loading="lazy"
                       />
                     )}
                   </div>
-                  <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 to-transparent p-3">
+                  <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 to-transparent p-2">
                     <div className="text-white">
-                      {receipt.ocrVendor && (
-                        <p className="text-sm font-medium">{receipt.ocrVendor}</p>
-                      )}
                       {receipt.ocrAmount && (
-                        <p className="text-lg font-bold">
+                        <p className="text-sm font-bold">
                           {formatCurrency(parseFloat(receipt.ocrAmount))}
                         </p>
                       )}
-                      {receipt.ocrDate && (
-                        <p className="text-xs opacity-75">
-                          {formatDate(receipt.ocrDate)}
-                        </p>
+                      {receipt.ocrVendor && (
+                        <p className="text-xs truncate opacity-90">{receipt.ocrVendor}</p>
                       )}
                     </div>
-                    <div className="mt-2 flex gap-1 flex-wrap">
-                      {receipt.ocrStatus !== 'completed' && (
+                    <div className="mt-1 flex gap-1 flex-wrap">
+                      {receipt.ocrStatus !== 'completed' && receipt.ocrStatus !== 'pending' && (
                         (() => {
                           const statusInfo = getOcrStatusInfo(receipt.ocrStatus)
                           const StatusIcon = statusInfo.icon
                           return (
-                            <Badge variant={statusInfo.variant} className="text-xs">
-                              <StatusIcon className={`mr-1 h-3 w-3 ${receipt.ocrStatus === 'processing' ? 'animate-spin' : ''}`} />
-                              OCR: {statusInfo.label}
+                            <Badge variant={statusInfo.variant} className="text-[10px] px-1 py-0">
+                              <StatusIcon className={`mr-0.5 h-2.5 w-2.5 ${receipt.ocrStatus === 'processing' ? 'animate-spin' : ''}`} />
+                              {statusInfo.label}
                             </Badge>
                           )
                         })()
                       )}
                       {receipt.transactions.length > 0 ? (
-                        <Badge variant="success">Matchet</Badge>
+                        <Badge variant="success" className="text-[10px] px-1 py-0">Matchet</Badge>
                       ) : (
-                        <Badge variant="warning">Ikke matchet</Badge>
+                        <Badge variant="warning" className="text-[10px] px-1 py-0">Ej matchet</Badge>
                       )}
                     </div>
                   </div>
@@ -345,7 +361,7 @@ export default function ReceiptsPage() {
 
       {/* Receipt detail dialog */}
       <Dialog open={!!selectedReceipt} onOpenChange={() => setSelectedReceipt(null)}>
-        <DialogContent className="max-w-3xl">
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Bilagsdetaljer</DialogTitle>
             <DialogDescription>
@@ -354,12 +370,12 @@ export default function ReceiptsPage() {
           </DialogHeader>
           {selectedReceipt && (
             <div className="grid gap-4 md:grid-cols-2">
-              <div className="overflow-hidden rounded-lg bg-muted">
+              <div className="overflow-hidden rounded-lg bg-muted max-h-[400px]">
                 {isPdf(selectedReceipt.imageUrl, selectedReceipt.fileName) ? (
-                  <div className="flex flex-col">
+                  <div className="flex flex-col h-full">
                     <iframe
                       src={selectedReceipt.imageUrl}
-                      className="h-[500px] w-full"
+                      className="h-[350px] w-full"
                       title="PDF bilag"
                     />
                     <a
@@ -375,7 +391,7 @@ export default function ReceiptsPage() {
                   <img
                     src={selectedReceipt.imageUrl}
                     alt="Bilag"
-                    className="w-full"
+                    className="w-full max-h-[400px] object-contain"
                   />
                 )}
               </div>
@@ -439,8 +455,19 @@ export default function ReceiptsPage() {
                   )}
                 </div>
 
-                {/* Delete button */}
-                <div className="pt-4 border-t">
+                {/* Action buttons */}
+                <div className="pt-4 border-t flex gap-2 flex-wrap">
+                  {(selectedReceipt.ocrStatus === 'failed' || selectedReceipt.ocrStatus === 'no_api_key' || !selectedReceipt.ocrAmount) && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => retryOcr(selectedReceipt.id)}
+                      disabled={retrying}
+                    >
+                      <RefreshCw className={`mr-2 h-4 w-4 ${retrying ? 'animate-spin' : ''}`} />
+                      {retrying ? 'Kører OCR...' : 'Kør OCR igen'}
+                    </Button>
+                  )}
                   <Button
                     variant="destructive"
                     size="sm"
