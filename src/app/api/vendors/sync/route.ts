@@ -2,12 +2,47 @@ import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getCompanyContext } from '@/lib/company'
 
+// Known vendor patterns - maps common prefixes to clean vendor names
+const KNOWN_VENDORS: Record<string, string> = {
+  'msft': 'Microsoft',
+  'microsoft': 'Microsoft',
+  'google': 'Google',
+  'apple.com': 'Apple',
+  'amazon': 'Amazon',
+  'paypal': 'PayPal',
+  'netflix': 'Netflix',
+  'spotify': 'Spotify',
+  'adobe': 'Adobe',
+  'dropbox': 'Dropbox',
+  'github': 'GitHub',
+  'slack': 'Slack',
+  'zoom': 'Zoom',
+  'linkedin': 'LinkedIn',
+  'fb ': 'Facebook',
+  'facebook': 'Facebook',
+  'meta ': 'Meta',
+  'aws ': 'Amazon Web Services',
+  'digitalocean': 'DigitalOcean',
+  'heroku': 'Heroku',
+  'stripe': 'Stripe',
+}
+
 // Extract vendor name from transaction description (same logic as reports)
 function extractVendorName(description: string): string | null {
   if (!description) return null
 
+  const lowerDesc = description.toLowerCase()
+
+  // Check for known vendors first
+  for (const [pattern, vendorName] of Object.entries(KNOWN_VENDORS)) {
+    if (lowerDesc.includes(pattern)) {
+      return vendorName
+    }
+  }
+
   let name = description
     .replace(/\d{2}[./-]\d{2}[./-]\d{2,4}/g, '') // Remove dates
+    .replace(/\*\s*[A-Z0-9]+/gi, '') // Remove reference codes like * E0200UX4PO
     .replace(/\*\d+/g, '') // Remove card numbers like *1234
     .replace(/\b\d{6,}\b/g, '') // Remove long numbers
     .replace(/DKK\s*[\d.,]+/gi, '') // Remove amounts
