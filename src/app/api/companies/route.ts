@@ -11,6 +11,12 @@ export async function GET() {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
+  // Get user's activeCompanyId from database (not session)
+  const user = await prisma.user.findUnique({
+    where: { id: session.user.id },
+    select: { activeCompanyId: true },
+  })
+
   const companies = await getUserCompanies(session.user.id)
 
   return NextResponse.json(
@@ -19,7 +25,7 @@ export async function GET() {
       name: uc.company.name,
       cvr: uc.company.cvr,
       role: uc.role,
-      isActive: session.user.companyId === uc.company.id,
+      isActive: user?.activeCompanyId === uc.company.id,
     }))
   )
 }

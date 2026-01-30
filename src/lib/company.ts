@@ -15,13 +15,18 @@ export async function getCompanyContext(): Promise<CompanyContext | null> {
     return null
   }
 
-  // If session has companyId, verify user has access
-  if (session.user.companyId) {
+  // Always read activeCompanyId from database to ensure accuracy
+  const user = await prisma.user.findUnique({
+    where: { id: session.user.id },
+    select: { activeCompanyId: true },
+  })
+
+  if (user?.activeCompanyId) {
     const userCompany = await prisma.userCompany.findUnique({
       where: {
         userId_companyId: {
           userId: session.user.id,
-          companyId: session.user.companyId,
+          companyId: user.activeCompanyId,
         },
       },
       include: { company: true },
@@ -40,6 +45,7 @@ export async function getCompanyContext(): Promise<CompanyContext | null> {
   const userCompany = await prisma.userCompany.findFirst({
     where: { userId: session.user.id },
     include: { company: true },
+    orderBy: { createdAt: 'asc' },
   })
 
   if (userCompany) {
