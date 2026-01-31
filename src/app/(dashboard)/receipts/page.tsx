@@ -14,6 +14,7 @@ import {
 } from '@/components/ui/dialog'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { Upload, Camera, Search, Image as ImageIcon, Loader2, X, FileText, Trash2, AlertCircle, CheckCircle2, Clock, RefreshCw, Save, Sparkles } from 'lucide-react'
+import { PdfThumbnail } from '@/components/pdf-thumbnail'
 import {
   Select,
   SelectContent,
@@ -443,10 +444,7 @@ export default function ReceiptsPage() {
                 >
                   <div className="aspect-square overflow-hidden">
                     {isPdf(receipt.imageUrl, receipt.fileName) ? (
-                      <div className="flex h-full w-full flex-col items-center justify-center bg-muted">
-                        <FileText className="h-8 w-8 text-red-500" />
-                        <p className="mt-1 text-xs font-medium text-muted-foreground">PDF</p>
-                      </div>
+                      <PdfThumbnail url={receipt.imageUrl} />
                     ) : (
                       <img
                         src={receipt.imageUrl}
