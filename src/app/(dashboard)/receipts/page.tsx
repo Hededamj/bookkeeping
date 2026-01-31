@@ -37,6 +37,46 @@ const isPdf = (url: string, fileName: string | null): boolean => {
   return false
 }
 
+// Convert base64 data URL to blob URL for PDF viewing
+const useDataUrlToBlob = (dataUrl: string | undefined, isPdfFile: boolean) => {
+  const [blobUrl, setBlobUrl] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!dataUrl || !isPdfFile) {
+      setBlobUrl(null)
+      return
+    }
+
+    // Check if it's a base64 data URL
+    if (dataUrl.startsWith('data:')) {
+      try {
+        const [header, base64] = dataUrl.split(',')
+        const mimeMatch = header.match(/data:([^;]+)/)
+        const mimeType = mimeMatch ? mimeMatch[1] : 'application/pdf'
+
+        const byteCharacters = atob(base64)
+        const byteNumbers = new Array(byteCharacters.length)
+        for (let i = 0; i < byteCharacters.length; i++) {
+          byteNumbers[i] = byteCharacters.charCodeAt(i)
+        }
+        const byteArray = new Uint8Array(byteNumbers)
+        const blob = new Blob([byteArray], { type: mimeType })
+        const url = URL.createObjectURL(blob)
+        setBlobUrl(url)
+
+        return () => URL.revokeObjectURL(url)
+      } catch (e) {
+        console.error('Failed to convert data URL to blob:', e)
+        setBlobUrl(null)
+      }
+    } else {
+      setBlobUrl(dataUrl)
+    }
+  }, [dataUrl, isPdfFile])
+
+  return blobUrl
+}
+
 // OCR status helper
 const getOcrStatusInfo = (status: string) => {
   switch (status) {
@@ -102,6 +142,12 @@ export default function ReceiptsPage() {
       setNewVendorName('')
     }
   }, [selectedReceipt])
+
+  // Convert PDF data URL to blob URL for viewing
+  const pdfBlobUrl = useDataUrlToBlob(
+    selectedReceipt?.imageUrl,
+    selectedReceipt ? isPdf(selectedReceipt.imageUrl, selectedReceipt.fileName) : false
+  )
 
   const fetchVendors = async () => {
     try {
@@ -462,19 +508,41 @@ export default function ReceiptsPage() {
               <div className="overflow-hidden rounded-lg bg-muted max-h-[400px]">
                 {isPdf(selectedReceipt.imageUrl, selectedReceipt.fileName) ? (
                   <div className="flex flex-col h-full">
-                    <iframe
-                      src={selectedReceipt.imageUrl}
-                      className="h-[350px] w-full"
-                      title="PDF bilag"
-                    />
-                    <a
-                      href={selectedReceipt.imageUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="mt-2 text-center text-sm text-primary hover:underline"
-                    >
-                      Åbn PDF i nyt vindue
-                    </a>
+                    {pdfBlobUrl ? (
+                      <object
+                        data={pdfBlobUrl}
+                        type="application/pdf"
+                        className="h-[350px] w-full"
+                      >
+                        <div className="flex flex-col items-center justify-center h-[350px] bg-muted">
+                          <FileText className="h-16 w-16 text-red-500 mb-4" />
+                          <p className="text-sm text-muted-foreground mb-2">PDF kan ikke vises i browser</p>
+                          <a
+                            href={pdfBlobUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-primary hover:underline"
+                          >
+                            Åbn PDF i nyt vindue
+                          </a>
+                        </div>
+                      </object>
+                    ) : (
+                      <div className="flex flex-col items-center justify-center h-[350px]">
+                        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+                        <p className="mt-2 text-sm text-muted-foreground">Indlæser PDF...</p>
+                      </div>
+                    )}
+                    {pdfBlobUrl && (
+                      <a
+                        href={pdfBlobUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="mt-2 text-center text-sm text-primary hover:underline"
+                      >
+                        Åbn PDF i nyt vindue
+                      </a>
+                    )}
                   </div>
                 ) : (
                   <img
