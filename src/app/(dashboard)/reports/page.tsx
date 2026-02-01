@@ -26,7 +26,8 @@ import {
   AlertCircle,
   Building2,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  Receipt
 } from 'lucide-react'
 
 type ReportData = {
@@ -69,6 +70,25 @@ type VendorData = {
   }>
 }
 
+type VatReport = {
+  summary: {
+    period: string
+    inputVat: number
+    outputVat: number
+    netVat: number
+    transactionCount: number
+    transactionsWithVat: number
+  }
+  byMonth: Array<{
+    month: string
+    income: number
+    expense: number
+    inputVat: number
+    outputVat: number
+    netVat: number
+  }>
+}
+
 const months = [
   'Januar', 'Februar', 'Marts', 'April', 'Maj', 'Juni',
   'Juli', 'August', 'September', 'Oktober', 'November', 'December'
@@ -82,6 +102,8 @@ export default function ReportsPage() {
   const [yearlyData, setYearlyData] = useState<ReportData | null>(null)
   const [yearSummaries, setYearSummaries] = useState<YearSummary[]>([])
   const [vendors, setVendors] = useState<VendorData[]>([])
+  const [vatReport, setVatReport] = useState<VatReport | null>(null)
+  const [vatQuarter, setVatQuarter] = useState<string>('')
   const [expandedVendor, setExpandedVendor] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState('annual')
@@ -132,14 +154,21 @@ export default function ReportsPage() {
   const fetchReport = async () => {
     setLoading(true)
     try {
-      const [monthlyRes, yearlyRes, vendorsRes] = await Promise.all([
+      const vatUrl = vatQuarter
+        ? `/api/reports/vat?year=${selectedYear}&quarter=${vatQuarter}`
+        : `/api/reports/vat?year=${selectedYear}`
+
+      const [monthlyRes, yearlyRes, vendorsRes, vatRes] = await Promise.all([
         fetch(`/api/reports?year=${selectedYear}&month=${month}`),
         fetch(`/api/reports?year=${selectedYear}`),
         fetch(`/api/reports/vendors?year=${selectedYear}`),
+        fetch(vatUrl),
       ])
       const monthlyData = await monthlyRes.json()
       const vendorsData = await vendorsRes.json()
+      const vatData = await vatRes.json()
       setVendors(vendorsData.vendors || [])
+      setVatReport(vatData)
       const yearlyDataResponse = await yearlyRes.json()
       setReportData(monthlyData)
       setYearlyData(yearlyDataResponse)
@@ -281,6 +310,10 @@ export default function ReportsPage() {
               <FileText className="mr-2 h-4 w-4" />
               Årsregnskab {selectedYear}
             </TabsTrigger>
+            <TabsTrigger value="vat">
+              <Receipt className="mr-2 h-4 w-4" />
+              Moms
+            </TabsTrigger>
             <TabsTrigger value="vendors">
               <Building2 className="mr-2 h-4 w-4" />
               Leverandører
@@ -318,14 +351,27 @@ export default function ReportsPage() {
                 ))}
               </SelectContent>
             </Select>
-            <Button
-              variant="outline"
-              onClick={() => exportAnnualCSV(selectedYear)}
-              disabled={!yearlyData}
+            <Select
+              value="export"
+              onValueChange={(value) => {
+                if (value !== 'export') {
+                  window.open(`/api/reports/export?year=${selectedYear}&type=${value}`, '_blank')
+                }
+              }}
             >
-              <Download className="mr-2 h-4 w-4" />
-              Eksporter
-            </Button>
+              <SelectTrigger className="w-[180px]">
+                <Download className="mr-2 h-4 w-4" />
+                <SelectValue placeholder="Eksporter" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="export" disabled>Vælg rapport...</SelectItem>
+                <SelectItem value="full">Revisorpakke (komplet)</SelectItem>
+                <SelectItem value="summary">Årsregnskab</SelectItem>
+                <SelectItem value="vat">Momsrapport</SelectItem>
+                <SelectItem value="transactions">Transaktioner</SelectItem>
+                <SelectItem value="receipts">Bilagsliste</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
         </div>
 
@@ -463,6 +509,181 @@ export default function ReportsPage() {
               </CardContent>
             </Card>
           )}
+        </TabsContent>
+
+        {/* VAT/Moms Tab */}
+        <TabsContent value="vat" className="space-y-4">
+          <div className="flex items-center gap-4 mb-4">
+            <Select value={vatQuarter} onValueChange={setVatQuarter}>
+              <SelectTrigger className="w-[180px]">
+                <SelectValue placeholder="Vælg kvartal (valgfrit)" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="">Hele året</SelectItem>
+                <SelectItem value="Q1">Q1 (jan-mar)</SelectItem>
+                <SelectItem value="Q2">Q2 (apr-jun)</SelectItem>
+                <SelectItem value="Q3">Q3 (jul-sep)</SelectItem>
+                <SelectItem value="Q4">Q4 (okt-dec)</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* VAT Summary Cards */}
+          <div className="grid gap-4 md:grid-cols-3">
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between pb-2">
+                <CardTitle className="text-sm font-medium text-muted-foreground">
+                  Købsmoms (indgående)
+                </CardTitle>
+                <TrendingDown className="h-4 w-4 text-blue-500" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold text-blue-600">
+                  {formatCurrency(vatReport?.summary.inputVat || 0)}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Moms på udgifter - kan trækkes fra
+                </p>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between pb-2">
+                <CardTitle className="text-sm font-medium text-muted-foreground">
+                  Salgsmoms (udgående)
+                </CardTitle>
+                <TrendingUp className="h-4 w-4 text-orange-500" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold text-orange-600">
+                  {formatCurrency(vatReport?.summary.outputVat || 0)}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Moms på indtægter - skal afregnes
+                </p>
+              </CardContent>
+            </Card>
+
+            <Card className={vatReport && vatReport.summary.netVat >= 0 ? 'border-red-200' : 'border-green-200'}>
+              <CardHeader className="flex flex-row items-center justify-between pb-2">
+                <CardTitle className="text-sm font-medium text-muted-foreground">
+                  Netto moms
+                </CardTitle>
+                {vatReport && vatReport.summary.netVat >= 0 ? (
+                  <AlertCircle className="h-4 w-4 text-red-500" />
+                ) : (
+                  <CheckCircle2 className="h-4 w-4 text-green-500" />
+                )}
+              </CardHeader>
+              <CardContent>
+                <div className={`text-2xl font-bold ${
+                  vatReport && vatReport.summary.netVat >= 0 ? 'text-red-600' : 'text-green-600'
+                }`}>
+                  {formatCurrency(vatReport?.summary.netVat || 0)}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  {vatReport && vatReport.summary.netVat >= 0
+                    ? 'Skal betales til SKAT'
+                    : 'Tilgode fra SKAT'}
+                </p>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* VAT by Month */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Momsopgørelse per måned</CardTitle>
+              <CardDescription>
+                {vatReport?.summary.period} - {vatReport?.summary.transactionsWithVat || 0} af {vatReport?.summary.transactionCount || 0} transaktioner har momsdata
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {vatReport && vatReport.byMonth.length > 0 ? (
+                <div className="space-y-2">
+                  {/* Header */}
+                  <div className="grid grid-cols-6 gap-4 border-b pb-2 text-sm font-medium text-muted-foreground">
+                    <div>Måned</div>
+                    <div className="text-right">Indtægter</div>
+                    <div className="text-right">Udgifter</div>
+                    <div className="text-right">Salgsmoms</div>
+                    <div className="text-right">Købsmoms</div>
+                    <div className="text-right">Netto</div>
+                  </div>
+
+                  {/* Month rows */}
+                  {vatReport.byMonth.map((row) => (
+                    <div key={row.month} className="grid grid-cols-6 gap-4 py-2 text-sm">
+                      <div className="font-medium">
+                        {new Date(row.month + '-01').toLocaleDateString('da-DK', { month: 'long', year: 'numeric' })}
+                      </div>
+                      <div className="text-right text-green-600">
+                        {formatCurrency(row.income)}
+                      </div>
+                      <div className="text-right text-red-600">
+                        {formatCurrency(row.expense)}
+                      </div>
+                      <div className="text-right text-orange-600">
+                        {formatCurrency(row.outputVat)}
+                      </div>
+                      <div className="text-right text-blue-600">
+                        {formatCurrency(row.inputVat)}
+                      </div>
+                      <div className={`text-right font-medium ${row.netVat >= 0 ? 'text-red-600' : 'text-green-600'}`}>
+                        {formatCurrency(row.netVat)}
+                      </div>
+                    </div>
+                  ))}
+
+                  {/* Total row */}
+                  <div className="grid grid-cols-6 gap-4 border-t pt-2 font-semibold">
+                    <div>Total</div>
+                    <div className="text-right text-green-600">
+                      {formatCurrency(vatReport.byMonth.reduce((sum, r) => sum + r.income, 0))}
+                    </div>
+                    <div className="text-right text-red-600">
+                      {formatCurrency(vatReport.byMonth.reduce((sum, r) => sum + r.expense, 0))}
+                    </div>
+                    <div className="text-right text-orange-600">
+                      {formatCurrency(vatReport.summary.outputVat)}
+                    </div>
+                    <div className="text-right text-blue-600">
+                      {formatCurrency(vatReport.summary.inputVat)}
+                    </div>
+                    <div className={`text-right ${vatReport.summary.netVat >= 0 ? 'text-red-600' : 'text-green-600'}`}>
+                      {formatCurrency(vatReport.summary.netVat)}
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex h-32 flex-col items-center justify-center gap-2">
+                  <Receipt className="h-10 w-10 text-muted-foreground" />
+                  <p className="text-muted-foreground">Ingen momsdata tilgængelig</p>
+                  <p className="text-sm text-muted-foreground">
+                    Upload bilag med moms eller tilføj moms manuelt på transaktioner
+                  </p>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Info box about VAT */}
+          <Card className="bg-blue-50 border-blue-200">
+            <CardContent className="pt-4">
+              <div className="flex gap-3">
+                <Receipt className="h-5 w-5 text-blue-600 flex-shrink-0 mt-0.5" />
+                <div className="text-sm text-blue-800">
+                  <p className="font-medium mb-1">Om momsafregning</p>
+                  <ul className="list-disc list-inside space-y-1 text-blue-700">
+                    <li>Dansk momssats er 25%</li>
+                    <li>Momsafregning sker kvartalsvis eller halvårligt for små virksomheder</li>
+                    <li>Købsmoms (på udgifter) kan trækkes fra salgsmoms (på indtægter)</li>
+                    <li>Er netto moms negativ, får du penge tilbage fra SKAT</li>
+                  </ul>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
         </TabsContent>
 
         <TabsContent value="monthly">

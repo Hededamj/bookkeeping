@@ -13,7 +13,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { formatCurrency, formatDate } from '@/lib/utils'
-import { Upload, Camera, Search, Image as ImageIcon, Loader2, X, FileText, Trash2, AlertCircle, CheckCircle2, Clock, RefreshCw, Save, Sparkles } from 'lucide-react'
+import { Upload, Camera, Search, Image as ImageIcon, Loader2, FileText, Trash2, AlertCircle, CheckCircle2, Clock, RefreshCw, Save, Sparkles } from 'lucide-react'
 import { PdfThumbnail } from '@/components/pdf-thumbnail'
 import {
   Select,
@@ -23,6 +23,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Label } from '@/components/ui/label'
+import { Pagination } from '@/components/ui/pagination'
 
 type Vendor = {
   id: string
@@ -120,8 +121,14 @@ export default function ReceiptsPage() {
   const [retrying, setRetrying] = useState(false)
   const [saving, setSaving] = useState(false)
   const [search, setSearch] = useState('')
+  const [searchDebounced, setSearchDebounced] = useState('')
   const [selectedReceipt, setSelectedReceipt] = useState<Receipt | null>(null)
   const [dragActive, setDragActive] = useState(false)
+
+  // Pagination state
+  const [page, setPage] = useState(1)
+  const [totalPages, setTotalPages] = useState(1)
+  const [total, setTotal] = useState(0)
 
   // Editable fields for selected receipt
   const [editVendor, setEditVendor] = useState<string>('')
@@ -129,10 +136,19 @@ export default function ReceiptsPage() {
   const [editDate, setEditDate] = useState<string>('')
   const [newVendorName, setNewVendorName] = useState<string>('')
 
+  // Debounce search
   useEffect(() => {
-    fetchReceipts()
+    const timer = setTimeout(() => {
+      setSearchDebounced(search)
+      setPage(1) // Reset to first page on search
+    }, 300)
+    return () => clearTimeout(timer)
+  }, [search])
+
+  useEffect(() => {
+    fetchReceipts(page, searchDebounced)
     fetchVendors()
-  }, [])
+  }, [page, searchDebounced])
 
   // Update edit fields when a receipt is selected
   useEffect(() => {
@@ -248,11 +264,31 @@ export default function ReceiptsPage() {
     }
   }
 
-  const fetchReceipts = async () => {
+  const fetchReceipts = async (p: number = 1, searchQuery: string = '') => {
+    setLoading(true)
     try {
-      const res = await fetch('/api/receipts')
-      const data = await res.json()
-      setReceipts(data)
+      const params = new URLSearchParams({
+        page: String(p),
+        limit: '30',
+      })
+      if (searchQuery) {
+        params.set('search', searchQuery)
+      }
+      const res = await fetch(`/api/receipts?${params}`)
+      const response = await res.json()
+
+      // Handle paginated response
+      if (response.pagination) {
+        setReceipts(response.data)
+        setPage(response.pagination.page)
+        setTotalPages(response.pagination.totalPages)
+        setTotal(response.pagination.total)
+      } else if (Array.isArray(response)) {
+        // Legacy non-paginated response
+        setReceipts(response)
+        setTotal(response.length)
+        setTotalPages(1)
+      }
     } catch (error) {
       console.error('Failed to fetch receipts:', error)
     } finally {
@@ -339,14 +375,8 @@ export default function ReceiptsPage() {
     }
   }
 
-  const filteredReceipts = receipts.filter((receipt) => {
-    const searchLower = search.toLowerCase()
-    return (
-      receipt.ocrVendor?.toLowerCase().includes(searchLower) ||
-      receipt.ocrText?.toLowerCase().includes(searchLower) ||
-      receipt.fileName?.toLowerCase().includes(searchLower)
-    )
-  })
+  // Server-side filtering now, just use receipts directly
+  const filteredReceipts = receipts
 
   return (
     <div className="space-y-6">
@@ -411,7 +441,7 @@ export default function ReceiptsPage() {
           <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <CardTitle>Alle bilag</CardTitle>
-              <CardDescription>{receipts.length} bilag i alt</CardDescription>
+              <CardDescription>{total} bilag i alt</CardDescription>
             </div>
             <div className="relative">
               <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
@@ -435,59 +465,68 @@ export default function ReceiptsPage() {
               <p className="text-muted-foreground">Ingen bilag fundet</p>
             </div>
           ) : (
-            <div className="grid gap-3 grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
-              {filteredReceipts.map((receipt) => (
-                <div
-                  key={receipt.id}
-                  className="group relative cursor-pointer overflow-hidden rounded-lg border bg-muted/50 transition-all hover:shadow-md"
-                  onClick={() => setSelectedReceipt(receipt)}
-                >
-                  <div className="aspect-square overflow-hidden">
-                    {isPdf(receipt.imageUrl, receipt.fileName) ? (
-                      <PdfThumbnail url={receipt.imageUrl} />
-                    ) : (
-                      <img
-                        src={receipt.imageUrl}
-                        alt={receipt.fileName || 'Bilag'}
-                        className="h-full w-full object-cover transition-transform group-hover:scale-105"
-                        loading="lazy"
-                      />
-                    )}
-                  </div>
-                  <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 to-transparent p-2">
-                    <div className="text-white">
-                      {receipt.ocrAmount && (
-                        <p className="text-sm font-bold">
-                          {formatCurrency(parseFloat(receipt.ocrAmount))}
-                        </p>
-                      )}
-                      {receipt.ocrVendor && (
-                        <p className="text-xs truncate opacity-90">{receipt.ocrVendor}</p>
-                      )}
-                    </div>
-                    <div className="mt-1 flex gap-1 flex-wrap">
-                      {receipt.ocrStatus !== 'completed' && receipt.ocrStatus !== 'pending' && (
-                        (() => {
-                          const statusInfo = getOcrStatusInfo(receipt.ocrStatus)
-                          const StatusIcon = statusInfo.icon
-                          return (
-                            <Badge variant={statusInfo.variant} className="text-[10px] px-1 py-0">
-                              <StatusIcon className={`mr-0.5 h-2.5 w-2.5 ${receipt.ocrStatus === 'processing' ? 'animate-spin' : ''}`} />
-                              {statusInfo.label}
-                            </Badge>
-                          )
-                        })()
-                      )}
-                      {receipt.transactions.length > 0 ? (
-                        <Badge variant="success" className="text-[10px] px-1 py-0">Matchet</Badge>
+            <>
+              <div className="grid gap-3 grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+                {filteredReceipts.map((receipt) => (
+                  <div
+                    key={receipt.id}
+                    className="group relative cursor-pointer overflow-hidden rounded-lg border bg-muted/50 transition-all hover:shadow-md"
+                    onClick={() => setSelectedReceipt(receipt)}
+                  >
+                    <div className="aspect-square overflow-hidden">
+                      {isPdf(receipt.imageUrl, receipt.fileName) ? (
+                        <PdfThumbnail url={receipt.imageUrl} />
                       ) : (
-                        <Badge variant="warning" className="text-[10px] px-1 py-0">Ej matchet</Badge>
+                        <img
+                          src={receipt.imageUrl}
+                          alt={receipt.fileName || 'Bilag'}
+                          className="h-full w-full object-cover transition-transform group-hover:scale-105"
+                          loading="lazy"
+                        />
                       )}
                     </div>
+                    <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 to-transparent p-2">
+                      <div className="text-white">
+                        {receipt.ocrAmount && (
+                          <p className="text-sm font-bold">
+                            {formatCurrency(parseFloat(receipt.ocrAmount))}
+                          </p>
+                        )}
+                        {receipt.ocrVendor && (
+                          <p className="text-xs truncate opacity-90">{receipt.ocrVendor}</p>
+                        )}
+                      </div>
+                      <div className="mt-1 flex gap-1 flex-wrap">
+                        {receipt.ocrStatus !== 'completed' && receipt.ocrStatus !== 'pending' && (
+                          (() => {
+                            const statusInfo = getOcrStatusInfo(receipt.ocrStatus)
+                            const StatusIcon = statusInfo.icon
+                            return (
+                              <Badge variant={statusInfo.variant} className="text-[10px] px-1 py-0">
+                                <StatusIcon className={`mr-0.5 h-2.5 w-2.5 ${receipt.ocrStatus === 'processing' ? 'animate-spin' : ''}`} />
+                                {statusInfo.label}
+                              </Badge>
+                            )
+                          })()
+                        )}
+                        {receipt.transactions.length > 0 ? (
+                          <Badge variant="success" className="text-[10px] px-1 py-0">Matchet</Badge>
+                        ) : (
+                          <Badge variant="warning" className="text-[10px] px-1 py-0">Ej matchet</Badge>
+                        )}
+                      </div>
+                    </div>
                   </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+              <Pagination
+                page={page}
+                totalPages={totalPages}
+                total={total}
+                onPageChange={setPage}
+                loading={loading}
+              />
+            </>
           )}
         </CardContent>
       </Card>

@@ -27,11 +27,11 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from '@/components/ui/dialog'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { Search, Filter, CheckCircle2, Clock, Receipt, Store, Pencil } from 'lucide-react'
 import { Label } from '@/components/ui/label'
+import { Pagination } from '@/components/ui/pagination'
 
 type Vendor = {
   id: string
@@ -62,6 +62,7 @@ export default function TransactionsPage() {
   const [categories, setCategories] = useState<Category[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
+  const [searchDebounced, setSearchDebounced] = useState('')
   const [filterMatched, setFilterMatched] = useState<string>('all')
   const [selectedTransaction, setSelectedTransaction] = useState<Transaction | null>(null)
   const [categoryDialogOpen, setCategoryDialogOpen] = useState(false)
@@ -70,17 +71,55 @@ export default function TransactionsPage() {
   const [savingVendor, setSavingVendor] = useState(false)
   const [vendors, setVendors] = useState<Vendor[]>([])
 
+  // Pagination state
+  const [page, setPage] = useState(1)
+  const [totalPages, setTotalPages] = useState(1)
+  const [total, setTotal] = useState(0)
+
+  // Debounce search
   useEffect(() => {
-    fetchTransactions()
+    const timer = setTimeout(() => {
+      setSearchDebounced(search)
+      setPage(1)
+    }, 300)
+    return () => clearTimeout(timer)
+  }, [search])
+
+  useEffect(() => {
+    fetchTransactions(page, searchDebounced, filterMatched)
     fetchCategories()
     fetchVendors()
-  }, [])
+  }, [page, searchDebounced, filterMatched])
 
-  const fetchTransactions = async () => {
+  const fetchTransactions = async (p: number = 1, searchQuery: string = '', matched: string = 'all') => {
+    setLoading(true)
     try {
-      const res = await fetch('/api/transactions')
-      const data = await res.json()
-      setTransactions(data)
+      const params = new URLSearchParams({
+        page: String(p),
+        limit: '50',
+      })
+      if (searchQuery) {
+        params.set('search', searchQuery)
+      }
+      if (matched !== 'all') {
+        params.set('matched', matched === 'matched' ? 'true' : 'false')
+      }
+
+      const res = await fetch(`/api/transactions?${params}`)
+      const response = await res.json()
+
+      // Handle paginated response
+      if (response.pagination) {
+        setTransactions(response.data)
+        setPage(response.pagination.page)
+        setTotalPages(response.pagination.totalPages)
+        setTotal(response.pagination.total)
+      } else if (Array.isArray(response)) {
+        // Legacy non-paginated response
+        setTransactions(response)
+        setTotal(response.length)
+        setTotalPages(1)
+      }
     } catch (error) {
       console.error('Failed to fetch transactions:', error)
     } finally {
@@ -164,14 +203,8 @@ export default function TransactionsPage() {
     }
   }
 
-  const filteredTransactions = transactions.filter((tx) => {
-    const matchesSearch = tx.description.toLowerCase().includes(search.toLowerCase())
-    const matchesFilter =
-      filterMatched === 'all' ||
-      (filterMatched === 'matched' && tx.matched) ||
-      (filterMatched === 'unmatched' && !tx.matched)
-    return matchesSearch && matchesFilter
-  })
+  // Server-side filtering now, just use transactions directly
+  const filteredTransactions = transactions
 
   return (
     <div className="space-y-6">
@@ -186,7 +219,7 @@ export default function TransactionsPage() {
             <div>
               <CardTitle>Alle transaktioner</CardTitle>
               <CardDescription>
-                {transactions.length} transaktioner i alt
+                {total} transaktioner i alt
               </CardDescription>
             </div>
             <div className="flex flex-col gap-2 sm:flex-row">
@@ -226,88 +259,97 @@ export default function TransactionsPage() {
               </p>
             </div>
           ) : (
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="w-[50px]">Status</TableHead>
-                    <TableHead>Dato</TableHead>
-                    <TableHead>Beskrivelse</TableHead>
-                    <TableHead>Leverandør</TableHead>
-                    <TableHead>Kategori</TableHead>
-                    <TableHead className="text-right">Beløb</TableHead>
-                    <TableHead className="w-[100px]">Handlinger</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {filteredTransactions.map((tx) => (
-                    <TableRow key={tx.id}>
-                      <TableCell>
-                        {tx.matched ? (
-                          <CheckCircle2 className="h-4 w-4 text-green-500" />
-                        ) : (
-                          <Clock className="h-4 w-4 text-yellow-500" />
-                        )}
-                      </TableCell>
-                      <TableCell className="whitespace-nowrap">
-                        {formatDate(tx.date)}
-                      </TableCell>
-                      <TableCell>
-                        <div className="max-w-[300px] truncate">{tx.description}</div>
-                      </TableCell>
-                      <TableCell>
-                        <button
-                          onClick={() => openVendorDialog(tx)}
-                          className="flex items-center gap-1 hover:text-primary transition-colors text-left"
-                        >
-                          {tx.vendor ? (
-                            <>
-                              <Store className="h-3 w-3 text-green-500 flex-shrink-0" />
-                              <span className="truncate max-w-[120px]">{tx.vendor.name}</span>
-                            </>
-                          ) : (
-                            <>
-                              <Pencil className="h-3 w-3 text-muted-foreground flex-shrink-0" />
-                              <span className="truncate max-w-[120px] text-muted-foreground italic">
-                                {tx.suggestedVendor || 'Ukendt'}
-                              </span>
-                            </>
-                          )}
-                        </button>
-                      </TableCell>
-                      <TableCell>
-                        {tx.category ? (
-                          <Badge variant="secondary">{tx.category.name}</Badge>
-                        ) : (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => {
-                              setSelectedTransaction(tx)
-                              setCategoryDialogOpen(true)
-                            }}
-                          >
-                            + Tilføj
-                          </Button>
-                        )}
-                      </TableCell>
-                      <TableCell className={`text-right font-medium ${
-                        parseFloat(tx.amount) >= 0 ? 'text-green-600' : 'text-red-600'
-                      }`}>
-                        {formatCurrency(parseFloat(tx.amount))}
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex gap-1">
-                          {tx.receipt && (
-                            <Receipt className="h-4 w-4 text-blue-500" />
-                          )}
-                        </div>
-                      </TableCell>
+            <>
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="w-[50px]">Status</TableHead>
+                      <TableHead>Dato</TableHead>
+                      <TableHead>Beskrivelse</TableHead>
+                      <TableHead>Leverandør</TableHead>
+                      <TableHead>Kategori</TableHead>
+                      <TableHead className="text-right">Beløb</TableHead>
+                      <TableHead className="w-[100px]">Handlinger</TableHead>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
+                  </TableHeader>
+                  <TableBody>
+                    {filteredTransactions.map((tx) => (
+                      <TableRow key={tx.id}>
+                        <TableCell>
+                          {tx.matched ? (
+                            <CheckCircle2 className="h-4 w-4 text-green-500" />
+                          ) : (
+                            <Clock className="h-4 w-4 text-yellow-500" />
+                          )}
+                        </TableCell>
+                        <TableCell className="whitespace-nowrap">
+                          {formatDate(tx.date)}
+                        </TableCell>
+                        <TableCell>
+                          <div className="max-w-[300px] truncate">{tx.description}</div>
+                        </TableCell>
+                        <TableCell>
+                          <button
+                            onClick={() => openVendorDialog(tx)}
+                            className="flex items-center gap-1 hover:text-primary transition-colors text-left"
+                          >
+                            {tx.vendor ? (
+                              <>
+                                <Store className="h-3 w-3 text-green-500 flex-shrink-0" />
+                                <span className="truncate max-w-[120px]">{tx.vendor.name}</span>
+                              </>
+                            ) : (
+                              <>
+                                <Pencil className="h-3 w-3 text-muted-foreground flex-shrink-0" />
+                                <span className="truncate max-w-[120px] text-muted-foreground italic">
+                                  {tx.suggestedVendor || 'Ukendt'}
+                                </span>
+                              </>
+                            )}
+                          </button>
+                        </TableCell>
+                        <TableCell>
+                          {tx.category ? (
+                            <Badge variant="secondary">{tx.category.name}</Badge>
+                          ) : (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => {
+                                setSelectedTransaction(tx)
+                                setCategoryDialogOpen(true)
+                              }}
+                            >
+                              + Tilføj
+                            </Button>
+                          )}
+                        </TableCell>
+                        <TableCell className={`text-right font-medium ${
+                          parseFloat(tx.amount) >= 0 ? 'text-green-600' : 'text-red-600'
+                        }`}>
+                          {formatCurrency(parseFloat(tx.amount))}
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex gap-1">
+                            {tx.receipt && (
+                              <Receipt className="h-4 w-4 text-blue-500" />
+                            )}
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+              <Pagination
+                page={page}
+                totalPages={totalPages}
+                total={total}
+                onPageChange={setPage}
+                loading={loading}
+              />
+            </>
           )}
         </CardContent>
       </Card>

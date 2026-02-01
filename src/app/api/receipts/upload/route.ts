@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getSettings } from '@/lib/settings'
 import { getCompanyContext } from '@/lib/company'
+import { uploadReceiptImage, isSupabaseConfigured } from '@/lib/supabase'
+import { parseOcrText } from '@/lib/ocr-parser'
 
 export async function POST(request: NextRequest) {
   const context = await getCompanyContext()
@@ -17,12 +19,31 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'No file provided' }, { status: 400 })
     }
 
-    // Convert file to base64 for storage (in production, use Supabase Storage)
     const bytes = await file.arrayBuffer()
     const buffer = Buffer.from(bytes)
-    const base64 = buffer.toString('base64')
     const mimeType = file.type
-    const dataUrl = `data:${mimeType};base64,${base64}`
+
+    let imageUrl: string
+
+    // Try Supabase Storage first, fall back to base64
+    if (isSupabaseConfigured()) {
+      const { url, error } = await uploadReceiptImage(
+        context.companyId,
+        file.name,
+        buffer,
+        mimeType
+      )
+
+      if (url) {
+        imageUrl = url
+      } else {
+        console.warn('Supabase upload failed, falling back to base64:', error)
+        imageUrl = `data:${mimeType};base64,${buffer.toString('base64')}`
+      }
+    } else {
+      // Fall back to base64 if Supabase not configured
+      imageUrl = `data:${mimeType};base64,${buffer.toString('base64')}`
+    }
 
     // Check if Google Cloud API key is configured
     const settings = await getSettings(context.companyId)
@@ -32,7 +53,7 @@ export async function POST(request: NextRequest) {
     const receipt = await prisma.receipt.create({
       data: {
         companyId: context.companyId,
-        imageUrl: dataUrl,
+        imageUrl,
         fileName: file.name,
         ocrStatus: hasApiKey ? 'pending' : 'no_api_key',
         ocrError: hasApiKey ? null : 'Google Cloud API-nøgle mangler. Konfigurer den under Indstillinger → API-nøgler.',
@@ -41,13 +62,12 @@ export async function POST(request: NextRequest) {
 
     // Only trigger OCR if API key is available
     if (hasApiKey) {
+      const base64 = buffer.toString('base64')
       const isPdf = mimeType === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')
 
       if (isPdf) {
-        // For PDFs, first try to extract embedded text, then fall back to Vision API
         processPdfOCR(receipt.id, buffer, base64, context.companyId).catch(console.error)
       } else {
-        // For images, use Google Vision API
         processOCR(receipt.id, base64, context.companyId).catch(console.error)
       }
     }
@@ -66,13 +86,11 @@ export async function POST(request: NextRequest) {
 }
 
 async function processOCR(receiptId: string, base64Image: string, companyId: string) {
-  // Update status to processing
   await prisma.receipt.update({
     where: { id: receiptId },
     data: { ocrStatus: 'processing' },
   })
 
-  // Get API key from settings
   const settings = await getSettings(companyId)
   const apiKey = settings.googleCloudKey
 
@@ -106,7 +124,6 @@ async function processOCR(receiptId: string, base64Image: string, companyId: str
 
     const data = await response.json()
 
-    // Check for API errors
     if (data.error) {
       throw new Error(data.error.message || 'Google Vision API error')
     }
@@ -125,51 +142,8 @@ async function processOCR(receiptId: string, base64Image: string, companyId: str
       return
     }
 
-    // Extract amount (Danish format)
-    const amountMatch = text.match(/(?:Total|Sum|I alt|Beløb|Amount)[:\s]*(\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{2}))/i) ||
-                       text.match(/(\d{1,3}(?:[.,]\d{3})*[.,]\d{2})\s*(?:kr|DKK)/i) ||
-                       text.match(/(?:DKK|EUR|USD)\s*(\d{1,3}(?:[.,]\d{3})*[.,]\d{2})/i)
-    const amount = amountMatch ? parseFloat(amountMatch[1].replace(/\./g, '').replace(',', '.')) : null
-
-    // Extract date (Danish format DD-MM-YYYY or DD/MM/YYYY)
-    const dateMatch = text.match(/(\d{1,2})[./-](\d{1,2})[./-](\d{2,4})/)
-    let date: Date | null = null
-    if (dateMatch) {
-      const day = parseInt(dateMatch[1])
-      const month = parseInt(dateMatch[2]) - 1
-      let year = parseInt(dateMatch[3])
-      if (year < 100) year += 2000
-      date = new Date(year, month, day)
-    }
-
-    // Extract vendor (usually first line or after specific patterns)
-    const lines = text.split('\n').filter((l: string) => l.trim())
-    let vendor: string | null = null
-
-    // Try to find company name patterns
-    const companyPatterns = [
-      /(?:Fra|From|Afsender|Sender)[:\s]*(.+)/i,
-      /(?:Faktura fra|Invoice from)[:\s]*(.+)/i,
-    ]
-
-    for (const pattern of companyPatterns) {
-      const match = text.match(pattern)
-      if (match && match[1]) {
-        vendor = match[1].trim().substring(0, 100)
-        break
-      }
-    }
-
-    // Fallback: use first non-empty line that looks like a company name
-    if (!vendor && lines.length > 0) {
-      for (const line of lines.slice(0, 5)) {
-        const trimmed = line.trim()
-        if (trimmed.length > 3 && trimmed.length < 60 && !/^\d+[./-]\d+[./-]\d+$/.test(trimmed)) {
-          vendor = trimmed
-          break
-        }
-      }
-    }
+    // Use consolidated OCR parser
+    const { amount, vatAmount, date, vendor } = parseOcrText(text)
 
     await prisma.receipt.update({
       where: { id: receiptId },
@@ -178,12 +152,13 @@ async function processOCR(receiptId: string, base64Image: string, companyId: str
         ocrError: null,
         ocrText: text.substring(0, 10000),
         ocrAmount: amount,
+        ocrVatAmount: vatAmount,
         ocrDate: date,
         ocrVendor: vendor,
       },
     })
 
-    console.log(`OCR completed for receipt ${receiptId}:`, { amount, date, vendor: vendor?.substring(0, 30) })
+    console.log(`OCR completed for receipt ${receiptId}:`, { amount, vatAmount, date, vendor: vendor?.substring(0, 30) })
   } catch (error) {
     console.error('OCR processing error:', error)
     await prisma.receipt.update({
@@ -197,7 +172,6 @@ async function processOCR(receiptId: string, base64Image: string, companyId: str
 }
 
 async function processPdfOCR(receiptId: string, pdfBuffer: Buffer, base64: string, companyId: string) {
-  // Update status to processing
   await prisma.receipt.update({
     where: { id: receiptId },
     data: { ocrStatus: 'processing' },
@@ -212,14 +186,13 @@ async function processPdfOCR(receiptId: string, pdfBuffer: Buffer, base64: strin
 
     if (!text.trim()) {
       // No embedded text - this is likely a scanned PDF
-      // Fall back to Google Vision API
       console.log('No embedded text in PDF, using Google Vision API')
       await processOCR(receiptId, base64, companyId)
       return
     }
 
-    // Parse the extracted text
-    const { amount, date, vendor } = parseOcrText(text)
+    // Use consolidated OCR parser
+    const { amount, vatAmount, date, vendor } = parseOcrText(text)
 
     await prisma.receipt.update({
       where: { id: receiptId },
@@ -228,20 +201,20 @@ async function processPdfOCR(receiptId: string, pdfBuffer: Buffer, base64: strin
         ocrError: null,
         ocrText: text.substring(0, 10000),
         ocrAmount: amount,
+        ocrVatAmount: vatAmount,
         ocrDate: date,
         ocrVendor: vendor,
       },
     })
 
-    console.log(`PDF OCR completed for receipt ${receiptId}:`, { amount, date, vendor: vendor?.substring(0, 30) })
+    console.log(`PDF OCR completed for receipt ${receiptId}:`, { amount, vatAmount, date, vendor: vendor?.substring(0, 30) })
   } catch (error) {
     console.error('PDF OCR processing error:', error)
 
-    // If pdf-parse fails, try Google Vision API as fallback
     try {
       console.log('pdf-parse failed, trying Google Vision API')
       await processOCR(receiptId, base64, companyId)
-    } catch (visionError) {
+    } catch {
       await prisma.receipt.update({
         where: { id: receiptId },
         data: {
@@ -251,55 +224,4 @@ async function processPdfOCR(receiptId: string, pdfBuffer: Buffer, base64: strin
       })
     }
   }
-}
-
-// Helper function to parse OCR text and extract structured data
-function parseOcrText(text: string): { amount: number | null; date: Date | null; vendor: string | null } {
-  // Extract amount (Danish format)
-  const amountMatch = text.match(/(?:Total|Sum|I alt|Beløb|Amount)[:\s]*(\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{2}))/i) ||
-                     text.match(/(\d{1,3}(?:[.,]\d{3})*[.,]\d{2})\s*(?:kr|DKK)/i) ||
-                     text.match(/(?:DKK|EUR|USD)\s*(\d{1,3}(?:[.,]\d{3})*[.,]\d{2})/i)
-  const amount = amountMatch ? parseFloat(amountMatch[1].replace(/\./g, '').replace(',', '.')) : null
-
-  // Extract date (Danish format DD-MM-YYYY or DD/MM/YYYY)
-  const dateMatch = text.match(/(\d{1,2})[./-](\d{1,2})[./-](\d{2,4})/)
-  let date: Date | null = null
-  if (dateMatch) {
-    const day = parseInt(dateMatch[1])
-    const month = parseInt(dateMatch[2]) - 1
-    let year = parseInt(dateMatch[3])
-    if (year < 100) year += 2000
-    date = new Date(year, month, day)
-  }
-
-  // Extract vendor
-  const lines = text.split('\n').filter((l: string) => l.trim())
-  let vendor: string | null = null
-
-  // Try to find company name patterns
-  const companyPatterns = [
-    /(?:Fra|From|Afsender|Sender)[:\s]*(.+)/i,
-    /(?:Faktura fra|Invoice from)[:\s]*(.+)/i,
-  ]
-
-  for (const pattern of companyPatterns) {
-    const match = text.match(pattern)
-    if (match && match[1]) {
-      vendor = match[1].trim().substring(0, 100)
-      break
-    }
-  }
-
-  // Fallback: use first non-empty line that looks like a company name
-  if (!vendor && lines.length > 0) {
-    for (const line of lines.slice(0, 5)) {
-      const trimmed = line.trim()
-      if (trimmed.length > 3 && trimmed.length < 60 && !/^\d+[./-]\d+[./-]\d+$/.test(trimmed)) {
-        vendor = trimmed
-        break
-      }
-    }
-  }
-
-  return { amount, date, vendor }
 }

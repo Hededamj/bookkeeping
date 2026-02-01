@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
+import { parseOcrText } from '@/lib/ocr-parser'
+import { uploadReceiptImage, isSupabaseConfigured } from '@/lib/supabase'
 import crypto from 'crypto'
 
 // This webhook receives parsed emails from email services
@@ -10,7 +12,6 @@ export async function POST(request: NextRequest) {
     const contentType = request.headers.get('content-type') || ''
 
     // For email webhooks, we need to determine the company from the recipient email
-    // Get settings that match the recipient email or use the first company with email settings
     const settingsWithEmail = await prisma.settings.findFirst({
       where: {
         emailAddress: { not: null },
@@ -25,6 +26,7 @@ export async function POST(request: NextRequest) {
 
     const companyId = settingsWithEmail.companyId
     const webhookSecret = settingsWithEmail.emailWebhookSecret
+    const apiKey = settingsWithEmail.googleCloudKey
 
     let attachments: Array<{
       filename: string
@@ -99,7 +101,6 @@ export async function POST(request: NextRequest) {
       // Postmark format
       const body = await request.json()
 
-      // Postmark sends attachments as base64 in JSON
       sender = body.From || body.FromFull?.Email || ''
       subject = body.Subject || ''
 
@@ -126,21 +127,43 @@ export async function POST(request: NextRequest) {
     // Process each attachment as a receipt
     const receipts = []
     for (const attachment of attachments) {
-      const dataUrl = `data:${attachment.contentType};base64,${attachment.content}`
+      const buffer = Buffer.from(attachment.content, 'base64')
+      let imageUrl: string
+
+      // Try Supabase Storage first
+      if (isSupabaseConfigured()) {
+        const { url, error } = await uploadReceiptImage(
+          companyId,
+          attachment.filename,
+          buffer,
+          attachment.contentType
+        )
+        if (url) {
+          imageUrl = url
+        } else {
+          console.warn('Supabase upload failed, falling back to base64:', error)
+          imageUrl = `data:${attachment.contentType};base64,${attachment.content}`
+        }
+      } else {
+        imageUrl = `data:${attachment.contentType};base64,${attachment.content}`
+      }
 
       const receipt = await prisma.receipt.create({
         data: {
           companyId,
-          imageUrl: dataUrl,
+          imageUrl,
           fileName: attachment.filename,
+          ocrStatus: apiKey ? 'pending' : 'no_api_key',
           notes: `Modtaget via email fra ${sender}${subject ? `: ${subject}` : ''}`,
         },
       })
 
       receipts.push(receipt)
 
-      // Trigger OCR processing asynchronously
-      processOCR(receipt.id, attachment.content, companyId).catch(console.error)
+      // Trigger OCR processing asynchronously if API key is configured
+      if (apiKey) {
+        processOCR(receipt.id, attachment.content, apiKey).catch(console.error)
+      }
     }
 
     // Log the email
@@ -170,9 +193,8 @@ export async function POST(request: NextRequest) {
   }
 }
 
-// Also support GET for webhook verification (some providers require this)
+// Support GET for webhook verification
 export async function GET() {
-  // Mailgun webhook verification
   return NextResponse.json({ status: 'ok' })
 }
 
@@ -183,19 +205,13 @@ function isImageOrPdf(contentType: string): boolean {
   )
 }
 
-async function processOCR(receiptId: string, base64Image: string, companyId: string) {
-  // Get API key from settings
-  const settings = await prisma.settings.findUnique({
-    where: { companyId },
-  })
-  const apiKey = settings?.googleCloudKey || process.env.GOOGLE_CLOUD_API_KEY
-
-  if (!apiKey) {
-    console.log('Google Cloud API key not configured, skipping OCR')
-    return
-  }
-
+async function processOCR(receiptId: string, base64Image: string, apiKey: string) {
   try {
+    await prisma.receipt.update({
+      where: { id: receiptId },
+      data: { ocrStatus: 'processing' },
+    })
+
     const response = await fetch(
       `https://vision.googleapis.com/v1/images:annotate?key=${apiKey}`,
       {
@@ -213,41 +229,48 @@ async function processOCR(receiptId: string, base64Image: string, companyId: str
     )
 
     const data = await response.json()
-    const text = data.responses?.[0]?.fullTextAnnotation?.text || ''
 
-    // Extract amount (Danish format)
-    const amountMatch =
-      text.match(/(?:Total|Sum|I alt|Beløb)[:\s]*(\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{2}))/i) ||
-      text.match(/(\d{1,3}(?:[.,]\d{3})*[.,]\d{2})\s*(?:kr|DKK)/i)
-    const amount = amountMatch
-      ? parseFloat(amountMatch[1].replace('.', '').replace(',', '.'))
-      : null
-
-    // Extract date (Danish format DD-MM-YYYY or DD/MM/YYYY)
-    const dateMatch = text.match(/(\d{1,2})[./-](\d{1,2})[./-](\d{2,4})/)
-    let date: Date | null = null
-    if (dateMatch) {
-      const day = parseInt(dateMatch[1])
-      const month = parseInt(dateMatch[2]) - 1
-      let year = parseInt(dateMatch[3])
-      if (year < 100) year += 2000
-      date = new Date(year, month, day)
+    if (data.error) {
+      throw new Error(data.error.message || 'Google Vision API error')
     }
 
-    // Extract vendor (usually first line)
-    const lines = text.split('\n').filter((l: string) => l.trim())
-    const vendor = lines[0]?.substring(0, 100) || null
+    const text = data.responses?.[0]?.fullTextAnnotation?.text || ''
+
+    if (!text.trim()) {
+      await prisma.receipt.update({
+        where: { id: receiptId },
+        data: {
+          ocrStatus: 'completed',
+          ocrText: '',
+        },
+      })
+      return
+    }
+
+    // Use consolidated OCR parser
+    const { amount, vatAmount, date, vendor } = parseOcrText(text)
 
     await prisma.receipt.update({
       where: { id: receiptId },
       data: {
-        ocrText: text,
+        ocrStatus: 'completed',
+        ocrText: text.substring(0, 10000),
         ocrAmount: amount,
+        ocrVatAmount: vatAmount,
         ocrDate: date,
         ocrVendor: vendor,
       },
     })
+
+    console.log(`Email OCR completed for receipt ${receiptId}`)
   } catch (error) {
     console.error('OCR processing error:', error)
+    await prisma.receipt.update({
+      where: { id: receiptId },
+      data: {
+        ocrStatus: 'failed',
+        ocrError: error instanceof Error ? error.message : 'OCR-behandling fejlede',
+      },
+    })
   }
 }

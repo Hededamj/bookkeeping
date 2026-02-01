@@ -60,6 +60,8 @@ model Transaction {
   date        DateTime
   description String
   amount      Decimal   @db.Decimal(12, 2)
+  vatAmount   Decimal?  @db.Decimal(12, 2) // Moms beløb
+  vatRate     Decimal?  @db.Decimal(5, 2)  // Momssats (typisk 25%)
   source      Source
   externalId  String?
   categoryId  String?
@@ -91,6 +93,7 @@ model Receipt {
   ocrError     String?
   ocrText      String?
   ocrAmount    Decimal?      @db.Decimal(12, 2)
+  ocrVatAmount Decimal?      @db.Decimal(12, 2) // Moms beløb fra OCR
   ocrDate      DateTime?
   ocrVendor    String?
   categoryId   String?

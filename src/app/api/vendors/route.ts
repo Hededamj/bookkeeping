@@ -1,26 +1,54 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getCompanyContext } from '@/lib/company'
+import { parsePaginationParams, createPaginatedResponse } from '@/lib/pagination'
 
-// Get all vendors
-export async function GET() {
+// Get all vendors with pagination
+export async function GET(request: NextRequest) {
   const context = await getCompanyContext()
   if (!context) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  const vendors = await prisma.vendor.findMany({
-    where: { companyId: context.companyId },
-    include: {
-      defaultCategory: true,
-      _count: {
-        select: { transactions: true },
-      },
-    },
-    orderBy: { name: 'asc' },
-  })
+  const { searchParams } = new URL(request.url)
+  const pagination = parsePaginationParams(searchParams)
 
-  return NextResponse.json(vendors)
+  // Optional filters
+  const search = searchParams.get('search')
+  const categoryId = searchParams.get('categoryId')
+
+  // Build where clause
+  const where: Record<string, unknown> = { companyId: context.companyId }
+
+  if (search) {
+    where.OR = [
+      { name: { contains: search, mode: 'insensitive' } },
+      { patterns: { hasSome: [search.toUpperCase()] } },
+    ]
+  }
+
+  if (categoryId) {
+    where.defaultCategoryId = categoryId
+  }
+
+  // Get total count and data in parallel
+  const [total, vendors] = await Promise.all([
+    prisma.vendor.count({ where }),
+    prisma.vendor.findMany({
+      where,
+      include: {
+        defaultCategory: true,
+        _count: {
+          select: { transactions: true },
+        },
+      },
+      orderBy: { name: 'asc' },
+      skip: pagination.offset,
+      take: pagination.limit,
+    }),
+  ])
+
+  return NextResponse.json(createPaginatedResponse(vendors, total, pagination))
 }
 
 // Create or find vendor by name
@@ -72,26 +100,27 @@ export async function POST(request: NextRequest) {
     })
   }
 
-  // Link matching transactions to this vendor
+  // Link matching transactions to this vendor using batch update
   let linkedCount = 0
   if (patterns.length > 0) {
-    for (const p of patterns) {
-      const result = await prisma.transaction.updateMany({
-        where: {
-          companyId: context.companyId,
-          vendorId: null, // Only unlinked transactions
+    // Use OR conditions for batch update instead of loop
+    const result = await prisma.transaction.updateMany({
+      where: {
+        companyId: context.companyId,
+        vendorId: null,
+        OR: patterns.map(p => ({
           description: {
             contains: p,
-            mode: 'insensitive',
+            mode: 'insensitive' as const,
           },
-        },
-        data: {
-          vendorId: vendor.id,
-          ...(categoryId && { categoryId }),
-        },
-      })
-      linkedCount += result.count
-    }
+        })),
+      },
+      data: {
+        vendorId: vendor.id,
+        ...(categoryId && { categoryId }),
+      },
+    })
+    linkedCount = result.count
   }
 
   return NextResponse.json({
