@@ -66,8 +66,12 @@ export default function MatchingPage() {
         fetch('/api/transactions'),
         fetch('/api/receipts'),
       ])
-      const txData = await txRes.json()
-      const receiptData = await receiptRes.json()
+      const txResponse = await txRes.json()
+      const receiptResponse = await receiptRes.json()
+
+      // Handle paginated responses
+      const txData = txResponse.data || txResponse
+      const receiptData = receiptResponse.data || receiptResponse
 
       setTransactions(txData.filter((tx: Transaction) => !tx.matched))
       setReceipts(receiptData.filter((r: Receipt) => r.transactions.length === 0))
