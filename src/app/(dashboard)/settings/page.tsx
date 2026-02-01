@@ -232,7 +232,7 @@ export default function SettingsPage() {
     try {
       const res = await fetch('/api/vendors')
       const data = await res.json()
-      setVendors(data)
+      setVendors(data.data || data)
     } catch (error) {
       console.error('Failed to fetch vendors:', error)
     }
