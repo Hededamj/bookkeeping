@@ -140,7 +140,32 @@ export async function PATCH(
       },
     })
 
-    return NextResponse.json({ receipt, patternsLearned, vendorId })
+    // Find similar receipts with the same original ocrVendor that could be updated
+    let similarReceipts: { id: string; ocrVendor: string | null }[] = []
+    const originalVendor = existingReceipt.ocrVendor
+    const newVendor = ocrVendor || newVendorName
+
+    if (originalVendor && newVendor && originalVendor !== newVendor && learnPatterns) {
+      // Find other receipts with the same original vendor name (case-insensitive)
+      similarReceipts = await prisma.receipt.findMany({
+        where: {
+          companyId: context.companyId,
+          id: { not: params.id }, // Exclude current receipt
+          ocrVendor: { equals: originalVendor, mode: 'insensitive' },
+        },
+        select: { id: true, ocrVendor: true },
+      })
+    }
+
+    return NextResponse.json({
+      receipt,
+      patternsLearned,
+      vendorId,
+      similarReceipts: similarReceipts.map(r => r.id),
+      similarCount: similarReceipts.length,
+      originalVendor,
+      newVendor,
+    })
   } catch (error) {
     console.error('Update receipt error:', error)
     return NextResponse.json(

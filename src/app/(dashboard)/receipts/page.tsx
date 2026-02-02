@@ -136,6 +136,15 @@ export default function ReceiptsPage() {
   const [editDate, setEditDate] = useState<string>('')
   const [newVendorName, setNewVendorName] = useState<string>('')
 
+  // Batch update dialog state
+  const [batchUpdateDialog, setBatchUpdateDialog] = useState<{
+    show: boolean
+    similarIds: string[]
+    originalVendor: string
+    newVendor: string
+  } | null>(null)
+  const [batchUpdating, setBatchUpdating] = useState(false)
+
   // Debounce search
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -220,7 +229,16 @@ export default function ReceiptsPage() {
         setSelectedReceipt(data.receipt)
         fetchReceipts()
         fetchVendors() // Refresh vendors in case new one was created
-        if (data.patternsLearned) {
+
+        // Check if there are similar receipts that can be updated
+        if (data.similarCount > 0) {
+          setBatchUpdateDialog({
+            show: true,
+            similarIds: data.similarReceipts,
+            originalVendor: data.originalVendor,
+            newVendor: data.newVendor,
+          })
+        } else if (data.patternsLearned) {
           alert(`Systemet har lært ${data.patternsLearned} nye mønstre for "${editVendor || newVendorName}"`)
         }
       }
@@ -241,6 +259,34 @@ export default function ReceiptsPage() {
         setEditVendor(vendor.name)
         setNewVendorName('')
       }
+    }
+  }
+
+  const batchUpdateReceipts = async () => {
+    if (!batchUpdateDialog) return
+
+    setBatchUpdating(true)
+    try {
+      const res = await fetch('/api/receipts/batch-update', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          receiptIds: batchUpdateDialog.similarIds,
+          ocrVendor: batchUpdateDialog.newVendor,
+        }),
+      })
+
+      if (res.ok) {
+        const data = await res.json()
+        alert(`${data.updatedCount} bilag er blevet opdateret til "${batchUpdateDialog.newVendor}"`)
+        fetchReceipts()
+      }
+    } catch (error) {
+      console.error('Batch update error:', error)
+      alert('Kunne ikke opdatere bilag')
+    } finally {
+      setBatchUpdating(false)
+      setBatchUpdateDialog(null)
     }
   }
 
@@ -530,6 +576,48 @@ export default function ReceiptsPage() {
           )}
         </CardContent>
       </Card>
+
+      {/* Batch update confirmation dialog */}
+      <Dialog open={!!batchUpdateDialog?.show} onOpenChange={() => setBatchUpdateDialog(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Opdater lignende bilag?</DialogTitle>
+            <DialogDescription>
+              Der blev fundet {batchUpdateDialog?.similarIds.length} andre bilag fra &quot;{batchUpdateDialog?.originalVendor}&quot;.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <p>
+              Vil du opdatere alle disse bilag til &quot;{batchUpdateDialog?.newVendor}&quot;?
+            </p>
+            <div className="flex gap-2 justify-end">
+              <Button
+                variant="outline"
+                onClick={() => setBatchUpdateDialog(null)}
+                disabled={batchUpdating}
+              >
+                Nej tak
+              </Button>
+              <Button
+                onClick={batchUpdateReceipts}
+                disabled={batchUpdating}
+              >
+                {batchUpdating ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Opdaterer...
+                  </>
+                ) : (
+                  <>
+                    <CheckCircle2 className="mr-2 h-4 w-4" />
+                    Ja, opdater {batchUpdateDialog?.similarIds.length} bilag
+                  </>
+                )}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Receipt detail dialog */}
       <Dialog open={!!selectedReceipt} onOpenChange={() => setSelectedReceipt(null)}>
