@@ -138,6 +138,10 @@ export default function SettingsPage() {
   const [stripeSyncing, setStripeSyncing] = useState(false)
   const [stripeStatus, setStripeStatus] = useState<string | null>(null)
 
+  // Category sync
+  const [syncingCategories, setSyncingCategories] = useState(false)
+  const [categorySyncStatus, setCategorySyncStatus] = useState<string | null>(null)
+
   // Webhook URL
   const [webhookUrl, setWebhookUrl] = useState('')
 
@@ -225,6 +229,26 @@ export default function SettingsPage() {
       fetchCategories()
     } catch (error) {
       console.error('Failed to delete category:', error)
+    }
+  }
+
+  const syncCategories = async () => {
+    setSyncingCategories(true)
+    setCategorySyncStatus(null)
+    try {
+      const res = await fetch('/api/categories/sync', { method: 'POST' })
+      const data = await res.json()
+      if (res.ok) {
+        setCategorySyncStatus(data.message)
+        fetchCategories()
+      } else {
+        setCategorySyncStatus('Fejl: ' + (data.error || 'Kunne ikke synkronisere'))
+      }
+    } catch (error) {
+      setCategorySyncStatus('Fejl ved synkronisering')
+    } finally {
+      setSyncingCategories(false)
+      setTimeout(() => setCategorySyncStatus(null), 5000)
     }
   }
 
@@ -1017,6 +1041,15 @@ export default function SettingsPage() {
                     Administrer dine indtægts- og udgiftskategorier
                   </CardDescription>
                 </div>
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    onClick={syncCategories}
+                    disabled={syncingCategories}
+                  >
+                    <RefreshCw className={`mr-2 h-4 w-4 ${syncingCategories ? 'animate-spin' : ''}`} />
+                    {syncingCategories ? 'Synkroniserer...' : 'Opdater standardkategorier'}
+                  </Button>
                 <Dialog open={categoryDialogOpen} onOpenChange={setCategoryDialogOpen}>
                   <DialogTrigger asChild>
                     <Button>
@@ -1066,7 +1099,13 @@ export default function SettingsPage() {
                     </DialogFooter>
                   </DialogContent>
                 </Dialog>
+                </div>
               </div>
+              {categorySyncStatus && (
+                <p className={`mt-2 text-sm ${categorySyncStatus.includes('Fejl') ? 'text-red-600' : 'text-green-600'}`}>
+                  {categorySyncStatus}
+                </p>
+              )}
             </CardHeader>
             <CardContent>
               <div className="space-y-2">
