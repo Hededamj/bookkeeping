@@ -23,8 +23,8 @@ export function PdfThumbnail({ url, className = '' }: PdfThumbnailProps) {
         // Dynamically import pdfjs-dist
         const pdfjsLib = await import('pdfjs-dist')
 
-        // Set worker source - use CDN for reliability
-        pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`
+        // Set worker source - use unpkg CDN (always has all npm versions)
+        pdfjsLib.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`
 
         let pdfData: ArrayBuffer | string
 
