@@ -354,7 +354,9 @@ export default function ReportsPage() {
             <Select
               value="export"
               onValueChange={(value) => {
-                if (value !== 'export') {
+                if (value === 'receipts-zip') {
+                  window.open(`/api/reports/export-receipts?year=${selectedYear}`, '_blank')
+                } else if (value !== 'export') {
                   window.open(`/api/reports/export?year=${selectedYear}&type=${value}`, '_blank')
                 }
               }}
@@ -369,7 +371,8 @@ export default function ReportsPage() {
                 <SelectItem value="summary">Årsregnskab</SelectItem>
                 <SelectItem value="vat">Momsrapport</SelectItem>
                 <SelectItem value="transactions">Transaktioner</SelectItem>
-                <SelectItem value="receipts">Bilagsliste</SelectItem>
+                <SelectItem value="receipts">Bilagsliste (CSV)</SelectItem>
+                <SelectItem value="receipts-zip">📁 Bilag som ZIP</SelectItem>
               </SelectContent>
             </Select>
           </div>

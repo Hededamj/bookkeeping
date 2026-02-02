@@ -29,7 +29,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { formatCurrency, formatDate } from '@/lib/utils'
-import { Search, Filter, CheckCircle2, Clock, Receipt, Store, Pencil } from 'lucide-react'
+import { Search, Filter, CheckCircle2, Clock, Receipt, Store, Pencil, Loader2 } from 'lucide-react'
 import { Label } from '@/components/ui/label'
 import { Pagination } from '@/components/ui/pagination'
 
@@ -70,6 +70,15 @@ export default function TransactionsPage() {
   const [vendorName, setVendorName] = useState('')
   const [savingVendor, setSavingVendor] = useState(false)
   const [vendors, setVendors] = useState<Vendor[]>([])
+
+  // Batch update dialog state
+  const [batchUpdateDialog, setBatchUpdateDialog] = useState<{
+    show: boolean
+    similarIds: string[]
+    categoryId: string
+    categoryName: string
+  } | null>(null)
+  const [batchUpdating, setBatchUpdating] = useState(false)
 
   // Pagination state
   const [page, setPage] = useState(1)
@@ -189,17 +198,56 @@ export default function TransactionsPage() {
     setVendorDialogOpen(true)
   }
 
-  const updateCategory = async (transactionId: string, categoryId: string) => {
+  const updateCategory = async (transactionId: string, categoryId: string, categoryName: string) => {
     try {
-      await fetch(`/api/transactions/${transactionId}`, {
+      const res = await fetch(`/api/transactions/${transactionId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ categoryId }),
       })
+      const data = await res.json()
       fetchTransactions()
       setCategoryDialogOpen(false)
+
+      // Check if there are similar transactions that can be updated
+      if (data.similarCount > 0) {
+        setBatchUpdateDialog({
+          show: true,
+          similarIds: data.similarTransactions,
+          categoryId,
+          categoryName,
+        })
+      }
     } catch (error) {
       console.error('Failed to update category:', error)
+    }
+  }
+
+  const batchUpdateTransactions = async () => {
+    if (!batchUpdateDialog) return
+
+    setBatchUpdating(true)
+    try {
+      const res = await fetch('/api/transactions/batch-update', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          transactionIds: batchUpdateDialog.similarIds,
+          categoryId: batchUpdateDialog.categoryId,
+        }),
+      })
+
+      if (res.ok) {
+        const data = await res.json()
+        alert(`${data.updatedCount} transaktioner er blevet kategoriseret som "${batchUpdateDialog.categoryName}"`)
+        fetchTransactions()
+      }
+    } catch (error) {
+      console.error('Batch update error:', error)
+      alert('Kunne ikke opdatere transaktioner')
+    } finally {
+      setBatchUpdating(false)
+      setBatchUpdateDialog(null)
     }
   }
 
@@ -368,7 +416,7 @@ export default function TransactionsPage() {
                 key={cat.id}
                 variant="outline"
                 className="justify-start"
-                onClick={() => selectedTransaction && updateCategory(selectedTransaction.id, cat.id)}
+                onClick={() => selectedTransaction && updateCategory(selectedTransaction.id, cat.id, cat.name)}
               >
                 <Badge
                   variant={cat.type === 'INCOME' ? 'success' : 'destructive'}
@@ -379,6 +427,48 @@ export default function TransactionsPage() {
                 {cat.name}
               </Button>
             ))}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Batch update confirmation dialog */}
+      <Dialog open={!!batchUpdateDialog?.show} onOpenChange={() => setBatchUpdateDialog(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Kategoriser lignende transaktioner?</DialogTitle>
+            <DialogDescription>
+              Der blev fundet {batchUpdateDialog?.similarIds.length} andre transaktioner med samme leverandør/mønster.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <p>
+              Vil du også kategorisere disse som &quot;{batchUpdateDialog?.categoryName}&quot;?
+            </p>
+            <DialogFooter>
+              <Button
+                variant="outline"
+                onClick={() => setBatchUpdateDialog(null)}
+                disabled={batchUpdating}
+              >
+                Nej tak
+              </Button>
+              <Button
+                onClick={batchUpdateTransactions}
+                disabled={batchUpdating}
+              >
+                {batchUpdating ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Opdaterer...
+                  </>
+                ) : (
+                  <>
+                    <CheckCircle2 className="mr-2 h-4 w-4" />
+                    Ja, kategoriser {batchUpdateDialog?.similarIds.length} transaktioner
+                  </>
+                )}
+              </Button>
+            </DialogFooter>
           </div>
         </DialogContent>
       </Dialog>

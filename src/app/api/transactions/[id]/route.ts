@@ -81,7 +81,37 @@ export async function PATCH(
     },
   })
 
-  return NextResponse.json(transaction)
+  // Find similar uncategorized transactions if a category was set
+  let similarTransactions: { id: string; description: string }[] = []
+  if (categoryId && !currentTransaction.categoryId) {
+    const pattern = extractPattern(currentTransaction.description)
+    if (pattern && pattern.length >= 3) {
+      // Find other transactions with similar patterns that are uncategorized
+      const allUncategorized = await prisma.transaction.findMany({
+        where: {
+          companyId: context.companyId,
+          id: { not: params.id },
+          categoryId: null,
+        },
+        select: { id: true, description: true },
+      })
+
+      // Filter by matching pattern
+      similarTransactions = allUncategorized.filter(tx => {
+        const txPattern = extractPattern(tx.description)
+        return txPattern === pattern ||
+               txPattern.includes(pattern) ||
+               pattern.includes(txPattern)
+      })
+    }
+  }
+
+  return NextResponse.json({
+    transaction,
+    similarTransactions: similarTransactions.map(t => t.id),
+    similarCount: similarTransactions.length,
+    pattern: categoryId && !currentTransaction.categoryId ? extractPattern(currentTransaction.description) : null,
+  })
 }
 
 export async function DELETE(
