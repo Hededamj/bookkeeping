@@ -431,6 +431,16 @@ export default function SettingsPage() {
     setStripeStatus(null)
     try {
       const res = await fetch(`/api/stripe/sync?year=${year}`, { method: 'POST' })
+
+      // Check if response is JSON
+      const contentType = res.headers.get('content-type')
+      if (!contentType || !contentType.includes('application/json')) {
+        const text = await res.text()
+        console.error('Non-JSON response:', text.substring(0, 200))
+        setStripeStatus('Server fejl - prøv igen om lidt')
+        return
+      }
+
       const result = await res.json()
 
       if (result.error) {

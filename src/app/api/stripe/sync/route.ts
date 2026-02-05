@@ -10,10 +10,12 @@ interface StripeListResponse<T> {
 
 async function fetchAllStripeItems<T extends { id: string }>(
   baseUrl: string,
-  apiKey: string
+  apiKey: string,
+  maxPages: number = 10 // Limit pages to avoid timeout
 ): Promise<T[]> {
   const allItems: T[] = []
   let startingAfter: string | null = null
+  let pageCount = 0
 
   do {
     const url = startingAfter
@@ -33,8 +35,9 @@ async function fetchAllStripeItems<T extends { id: string }>(
 
     const data: StripeListResponse<T> = await response.json()
     allItems.push(...data.data)
+    pageCount++
 
-    if (data.has_more && data.data.length > 0) {
+    if (data.has_more && data.data.length > 0 && pageCount < maxPages) {
       startingAfter = data.data[data.data.length - 1].id
     } else {
       startingAfter = null
