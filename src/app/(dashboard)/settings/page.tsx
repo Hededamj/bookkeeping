@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState, useRef } from 'react'
+import { useSearchParams } from 'next/navigation'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -135,6 +136,9 @@ export default function SettingsPage() {
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   // Stripe sync
+  const searchParams = useSearchParams()
+  const currentYear = searchParams.get('year') ? parseInt(searchParams.get('year')!) : new Date().getFullYear()
+  const [stripeSyncYear, setStripeSyncYear] = useState(currentYear)
   const [stripeSyncing, setStripeSyncing] = useState(false)
   const [stripeStatus, setStripeStatus] = useState<string | null>(null)
 
@@ -427,13 +431,13 @@ export default function SettingsPage() {
     setStripeSyncing(true)
     setStripeStatus(null)
     try {
-      const res = await fetch('/api/stripe/sync', { method: 'POST' })
+      const res = await fetch(`/api/stripe/sync?year=${stripeSyncYear}`, { method: 'POST' })
       const result = await res.json()
 
       if (result.error) {
         setStripeStatus(`Fejl: ${result.error}`)
       } else {
-        setStripeStatus(`Synkroniseret ${result.imported} transaktioner`)
+        setStripeStatus(`Synkroniseret ${result.imported} transaktioner fra ${stripeSyncYear}`)
       }
     } catch (error) {
       setStripeStatus('Kunne ikke synkronisere')
@@ -562,6 +566,21 @@ export default function SettingsPage() {
                 </div>
 
                 <div className="flex items-center gap-2">
+                  <Select
+                    value={stripeSyncYear.toString()}
+                    onValueChange={(v) => setStripeSyncYear(parseInt(v))}
+                  >
+                    <SelectTrigger className="w-[100px]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {[2024, 2025, 2026, 2027].map((y) => (
+                        <SelectItem key={y} value={y.toString()}>
+                          {y}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                   <Button
                     variant="outline"
                     onClick={syncStripe}
