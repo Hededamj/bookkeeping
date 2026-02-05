@@ -14,6 +14,7 @@ import {
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { getCompanyContext } from '@/lib/company'
+import { getSettings } from '@/lib/settings'
 import { redirect } from 'next/navigation'
 import { YearSelector } from '@/components/year-selector'
 import { Suspense } from 'react'
@@ -171,8 +172,9 @@ export default async function DashboardPage({
   }
 
   const params = await searchParams
-  const currentYear = new Date().getFullYear()
-  const selectedYear = params.year ? parseInt(params.year) : currentYear
+  const settings = await getSettings(context.companyId)
+  const defaultYear = settings.activeFiscalYear || new Date().getFullYear()
+  const selectedYear = params.year ? parseInt(params.year) : defaultYear
 
   const stats = await getStats(context.companyId, selectedYear)
 

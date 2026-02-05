@@ -1,7 +1,6 @@
 'use client'
 
 import { useEffect, useState, useRef } from 'react'
-import { useSearchParams } from 'next/navigation'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -81,6 +80,7 @@ type AppSettings = {
   emailProvider: string
   emailWebhookSecret: string
   hasEmailWebhookSecret: boolean
+  activeFiscalYear: number | null
   emailLogs: Array<{
     id: string
     sender: string
@@ -116,6 +116,7 @@ export default function SettingsPage() {
     emailProvider: 'mailgun',
     emailWebhookSecret: '',
     hasEmailWebhookSecret: false,
+    activeFiscalYear: null,
     emailLogs: [],
   })
   const [saving, setSaving] = useState(false)
@@ -136,9 +137,6 @@ export default function SettingsPage() {
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   // Stripe sync
-  const searchParams = useSearchParams()
-  const currentYear = searchParams.get('year') ? parseInt(searchParams.get('year')!) : new Date().getFullYear()
-  const [stripeSyncYear, setStripeSyncYear] = useState(currentYear)
   const [stripeSyncing, setStripeSyncing] = useState(false)
   const [stripeStatus, setStripeStatus] = useState<string | null>(null)
 
@@ -428,16 +426,17 @@ export default function SettingsPage() {
       return
     }
 
+    const year = settings.activeFiscalYear || new Date().getFullYear()
     setStripeSyncing(true)
     setStripeStatus(null)
     try {
-      const res = await fetch(`/api/stripe/sync?year=${stripeSyncYear}`, { method: 'POST' })
+      const res = await fetch(`/api/stripe/sync?year=${year}`, { method: 'POST' })
       const result = await res.json()
 
       if (result.error) {
         setStripeStatus(`Fejl: ${result.error}`)
       } else {
-        setStripeStatus(`Synkroniseret ${result.imported} transaktioner fra ${stripeSyncYear}`)
+        setStripeStatus(`Synkroniseret ${result.imported} transaktioner fra ${year}`)
       }
     } catch (error) {
       setStripeStatus('Kunne ikke synkronisere')
@@ -471,12 +470,57 @@ export default function SettingsPage() {
     }
   }
 
+  const updateFiscalYear = async (year: number) => {
+    try {
+      await fetch('/api/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ activeFiscalYear: year }),
+      })
+      setSettings({ ...settings, activeFiscalYear: year })
+    } catch (error) {
+      console.error('Failed to update fiscal year:', error)
+    }
+  }
+
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-3xl font-bold">Indstillinger</h1>
         <p className="text-muted-foreground">Konfigurer integrationer og import</p>
       </div>
+
+      {/* Fiscal Year Selector */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Aktivt regnskabsår</CardTitle>
+          <CardDescription>
+            Vælg det regnskabsår du arbejder på. Dette bestemmer hvilket år der bruges til synkronisering og visning.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="flex items-center gap-4">
+            <Select
+              value={(settings.activeFiscalYear || new Date().getFullYear()).toString()}
+              onValueChange={(v) => updateFiscalYear(parseInt(v))}
+            >
+              <SelectTrigger className="w-[120px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {[2024, 2025, 2026, 2027].map((y) => (
+                  <SelectItem key={y} value={y.toString()}>
+                    {y}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <span className="text-sm text-muted-foreground">
+              Skift først når du har afleveret regnskab for {settings.activeFiscalYear || new Date().getFullYear()}
+            </span>
+          </div>
+        </CardContent>
+      </Card>
 
       <Tabs defaultValue="api">
         <TabsList className="flex-wrap">
@@ -566,28 +610,13 @@ export default function SettingsPage() {
                 </div>
 
                 <div className="flex items-center gap-2">
-                  <Select
-                    value={stripeSyncYear.toString()}
-                    onValueChange={(v) => setStripeSyncYear(parseInt(v))}
-                  >
-                    <SelectTrigger className="w-[100px]">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {[2024, 2025, 2026, 2027].map((y) => (
-                        <SelectItem key={y} value={y.toString()}>
-                          {y}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
                   <Button
                     variant="outline"
                     onClick={syncStripe}
                     disabled={!settings.hasStripeKey || stripeSyncing}
                   >
                     <RefreshCw className={`mr-2 h-4 w-4 ${stripeSyncing ? 'animate-spin' : ''}`} />
-                    {stripeSyncing ? 'Synkroniserer...' : 'Synkroniser nu'}
+                    {stripeSyncing ? 'Synkroniserer...' : `Synkroniser ${settings.activeFiscalYear || new Date().getFullYear()}`}
                   </Button>
                   {stripeStatus && (
                     <span className={`text-sm ${stripeStatus.includes('Fejl') ? 'text-red-600' : 'text-green-600'}`}>

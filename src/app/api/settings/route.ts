@@ -55,6 +55,9 @@ export async function GET() {
     emailWebhookSecret: settings.emailWebhookSecret ? maskKey(settings.emailWebhookSecret) : '',
     hasEmailWebhookSecret: !!settings.emailWebhookSecret,
 
+    // Fiscal year
+    activeFiscalYear: settings.activeFiscalYear,
+
     // Logs
     emailLogs,
   })
@@ -74,6 +77,7 @@ export async function POST(request: NextRequest) {
     emailAddress,
     emailProvider,
     emailWebhookSecret,
+    activeFiscalYear,
   } = body
 
   // Get or create settings for this company
@@ -81,7 +85,7 @@ export async function POST(request: NextRequest) {
     where: { companyId: context.companyId },
   })
 
-  const updateData: Record<string, string | null> = {}
+  const updateData: Record<string, string | number | null> = {}
 
   // Only update keys if they're provided and not masked
   if (stripeSecretKey !== undefined && !stripeSecretKey.includes('•')) {
@@ -101,6 +105,9 @@ export async function POST(request: NextRequest) {
   }
   if (emailWebhookSecret !== undefined && !emailWebhookSecret.includes('•')) {
     updateData.emailWebhookSecret = emailWebhookSecret || null
+  }
+  if (activeFiscalYear !== undefined) {
+    updateData.activeFiscalYear = activeFiscalYear ? parseInt(activeFiscalYear, 10) : null
   }
 
   if (!settings) {

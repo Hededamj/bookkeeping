@@ -7,6 +7,7 @@ export type AppSettings = {
   emailAddress: string | null
   emailProvider: string | null
   emailWebhookSecret: string | null
+  activeFiscalYear: number | null
 }
 
 // Cache by companyId
@@ -25,6 +26,7 @@ export async function getSettings(companyId?: string): Promise<AppSettings> {
       emailAddress: null,
       emailProvider: 'mailgun',
       emailWebhookSecret: process.env.EMAIL_WEBHOOK_SECRET || null,
+      activeFiscalYear: null,
     }
   }
 
@@ -45,6 +47,7 @@ export async function getSettings(companyId?: string): Promise<AppSettings> {
     emailAddress: settings?.emailAddress || null,
     emailProvider: settings?.emailProvider || 'mailgun',
     emailWebhookSecret: settings?.emailWebhookSecret || process.env.EMAIL_WEBHOOK_SECRET || null,
+    activeFiscalYear: settings?.activeFiscalYear || null,
   }
 
   settingsCache.set(companyId, { settings: appSettings, time: now })
