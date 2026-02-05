@@ -439,7 +439,8 @@ export default function SettingsPage() {
         setStripeStatus(`Synkroniseret ${result.imported} transaktioner fra ${year}`)
       }
     } catch (error) {
-      setStripeStatus('Kunne ikke synkronisere')
+      console.error('Stripe sync error:', error)
+      setStripeStatus(`Kunne ikke synkronisere: ${error instanceof Error ? error.message : 'Ukendt fejl'}`)
     } finally {
       setStripeSyncing(false)
     }

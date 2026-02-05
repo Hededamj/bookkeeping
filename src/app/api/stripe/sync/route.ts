@@ -259,8 +259,9 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ imported })
   } catch (error) {
     console.error('Stripe sync error:', error)
+    const errorMessage = error instanceof Error ? error.message : 'Ukendt fejl'
     return NextResponse.json(
-      { error: 'Kunne ikke synkronisere med Stripe' },
+      { error: `Kunne ikke synkronisere med Stripe: ${errorMessage}` },
       { status: 500 }
     )
   }
