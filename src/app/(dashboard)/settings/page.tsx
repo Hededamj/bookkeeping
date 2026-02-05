@@ -516,7 +516,7 @@ export default function SettingsPage() {
               </SelectContent>
             </Select>
             <span className="text-sm text-muted-foreground">
-              Skift først når du har afleveret regnskab for {settings.activeFiscalYear || new Date().getFullYear()}
+              Skift til næste år når regnskabet for {settings.activeFiscalYear || new Date().getFullYear()} er afleveret
             </span>
           </div>
         </CardContent>
