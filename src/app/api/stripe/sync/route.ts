@@ -3,6 +3,9 @@ import { prisma } from '@/lib/prisma'
 import { getSettings } from '@/lib/settings'
 import { getCompanyContext } from '@/lib/company'
 
+// Increase timeout for this route (max 60s on Vercel Pro, 10s on Hobby)
+export const maxDuration = 60
+
 interface StripeListResponse<T> {
   data: T[]
   has_more: boolean
@@ -48,27 +51,26 @@ async function fetchAllStripeItems<T extends { id: string }>(
 }
 
 export async function POST(request: NextRequest) {
-  const context = await getCompanyContext()
-  if (!context) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  }
-
-  const companyId = context.companyId
-
-  // Get year parameter from query string
-  const { searchParams } = new URL(request.url)
-  const yearParam = searchParams.get('year')
-  const year = yearParam ? parseInt(yearParam, 10) : null
-
-  // Build date filter for Stripe API (uses Unix timestamps)
-  let dateFilter = ''
-  if (year) {
-    const startOfYear = Math.floor(new Date(year, 0, 1).getTime() / 1000)
-    const startOfNextYear = Math.floor(new Date(year + 1, 0, 1).getTime() / 1000)
-    dateFilter = `&created[gte]=${startOfYear}&created[lt]=${startOfNextYear}`
-  }
-
   try {
+    const context = await getCompanyContext()
+    if (!context) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+
+    const companyId = context.companyId
+
+    // Get year parameter from query string
+    const { searchParams } = new URL(request.url)
+    const yearParam = searchParams.get('year')
+    const year = yearParam ? parseInt(yearParam, 10) : null
+
+    // Build date filter for Stripe API (uses Unix timestamps)
+    let dateFilter = ''
+    if (year) {
+      const startOfYear = Math.floor(new Date(year, 0, 1).getTime() / 1000)
+      const startOfNextYear = Math.floor(new Date(year + 1, 0, 1).getTime() / 1000)
+      dateFilter = `&created[gte]=${startOfYear}&created[lt]=${startOfNextYear}`
+    }
     // Get API key from settings
     const settings = await getSettings(companyId)
     const apiKey = settings.stripeSecretKey
