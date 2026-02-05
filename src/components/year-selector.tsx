@@ -9,7 +9,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 
-const years = [2025, 2026, 2027]
+const years = [2024, 2025, 2026, 2027]
 
 export function YearSelector({ currentYear }: { currentYear: number }) {
   const router = useRouter()
@@ -19,6 +19,13 @@ export function YearSelector({ currentYear }: { currentYear: number }) {
     const params = new URLSearchParams(searchParams.toString())
     params.set('year', year)
     router.push(`?${params.toString()}`)
+  }
+
+  // Remove year param to go back to default (activeFiscalYear)
+  const resetToDefault = () => {
+    const params = new URLSearchParams(searchParams.toString())
+    params.delete('year')
+    router.push(params.toString() ? `?${params.toString()}` : window.location.pathname)
   }
 
   return (
