@@ -11,43 +11,23 @@ interface StripeListResponse<T> {
   has_more: boolean
 }
 
-async function fetchAllStripeItems<T extends { id: string }>(
+async function fetchStripeItems<T extends { id: string }>(
   baseUrl: string,
-  apiKey: string,
-  maxPages: number = 10 // Limit pages to avoid timeout
+  apiKey: string
 ): Promise<T[]> {
-  const allItems: T[] = []
-  let startingAfter: string | null = null
-  let pageCount = 0
+  const response = await fetch(baseUrl, {
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+    },
+  })
 
-  do {
-    const url = startingAfter
-      ? `${baseUrl}&starting_after=${startingAfter}`
-      : baseUrl
+  if (!response.ok) {
+    const error = await response.json()
+    throw new Error(error.error?.message || 'Stripe API fejl')
+  }
 
-    const response = await fetch(url, {
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-      },
-    })
-
-    if (!response.ok) {
-      const error = await response.json()
-      throw new Error(error.error?.message || 'Stripe API fejl')
-    }
-
-    const data: StripeListResponse<T> = await response.json()
-    allItems.push(...data.data)
-    pageCount++
-
-    if (data.has_more && data.data.length > 0 && pageCount < maxPages) {
-      startingAfter = data.data[data.data.length - 1].id
-    } else {
-      startingAfter = null
-    }
-  } while (startingAfter)
-
-  return allItems
+  const data: StripeListResponse<T> = await response.json()
+  return data.data
 }
 
 export async function POST(request: NextRequest) {
@@ -95,7 +75,7 @@ export async function POST(request: NextRequest) {
     }>
 
     try {
-      charges = await fetchAllStripeItems(
+      charges = await fetchStripeItems(
         `https://api.stripe.com/v1/charges?limit=100${dateFilter}`,
         apiKey
       )
@@ -186,7 +166,7 @@ export async function POST(request: NextRequest) {
     }> = []
 
     try {
-      invoices = await fetchAllStripeItems(
+      invoices = await fetchStripeItems(
         `https://api.stripe.com/v1/invoices?limit=100&status=paid${dateFilter}`,
         apiKey
       )
