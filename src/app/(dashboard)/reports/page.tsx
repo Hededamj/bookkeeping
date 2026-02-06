@@ -95,8 +95,8 @@ const months = [
 ]
 
 export default function ReportsPage() {
-  const currentYear = new Date().getFullYear()
-  const [selectedYear, setSelectedYear] = useState(currentYear.toString())
+  const [activeFiscalYear, setActiveFiscalYear] = useState<number>(new Date().getFullYear())
+  const [selectedYear, setSelectedYear] = useState(new Date().getFullYear().toString())
   const [month, setMonth] = useState((new Date().getMonth() + 1).toString())
   const [reportData, setReportData] = useState<ReportData | null>(null)
   const [yearlyData, setYearlyData] = useState<ReportData | null>(null)
@@ -108,12 +108,31 @@ export default function ReportsPage() {
   const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState('annual')
 
-  // Years we're tracking: 2025, 2026, and preparing for 2027
-  const trackingYears = [2025, 2026, 2027]
+  // Years we're tracking: 2024, 2025, 2026, and preparing for 2027
+  const trackingYears = [2024, 2025, 2026, 2027]
+
+  // Fetch active fiscal year from settings
+  useEffect(() => {
+    const fetchSettings = async () => {
+      try {
+        const res = await fetch('/api/settings')
+        if (res.ok) {
+          const data = await res.json()
+          if (data.activeFiscalYear) {
+            setActiveFiscalYear(data.activeFiscalYear)
+            setSelectedYear(data.activeFiscalYear.toString())
+          }
+        }
+      } catch (error) {
+        console.error('Failed to fetch settings:', error)
+      }
+    }
+    fetchSettings()
+  }, [])
 
   useEffect(() => {
     fetchYearSummaries()
-  }, [])
+  }, [activeFiscalYear])
 
   useEffect(() => {
     fetchReport()
@@ -128,9 +147,11 @@ export default function ReportsPage() {
         const data = await res.json()
 
         let status: 'complete' | 'in-progress' | 'future' = 'future'
-        if (year < currentYear) {
+        if (year < activeFiscalYear) {
+          // Previous years: complete if no unmatched transactions
           status = data.unmatchedCount === 0 ? 'complete' : 'in-progress'
-        } else if (year === currentYear) {
+        } else if (year === activeFiscalYear) {
+          // Active fiscal year is always in progress
           status = 'in-progress'
         }
 
