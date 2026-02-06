@@ -420,7 +420,7 @@ export default function SettingsPage() {
     }
   }
 
-  const syncStripe = async () => {
+  const syncStripe = async (syncAll: boolean = false) => {
     if (!settings.hasStripeKey) {
       setStripeStatus('Tilføj Stripe API-nøgle først')
       return
@@ -429,38 +429,69 @@ export default function SettingsPage() {
     const year = settings.activeFiscalYear || new Date().getFullYear()
     setStripeSyncing(true)
     setStripeStatus(null)
+
+    let cursor: string | null = null
+    let totalImported = 0
+    let totalFound = 0
+    let totalSkipped = 0
+    let batchCount = 0
+
     try {
-      const res = await fetch(`/api/stripe/sync?year=${year}`, { method: 'POST' })
+      do {
+        batchCount++
+        const syncUrl: string = cursor
+          ? `/api/stripe/sync?year=${year}&cursor=${cursor}`
+          : `/api/stripe/sync?year=${year}`
 
-      // Check if response is JSON
-      const contentType = res.headers.get('content-type')
-      if (!contentType || !contentType.includes('application/json')) {
-        const text = await res.text()
-        console.error('Non-JSON response:', text.substring(0, 200))
-        setStripeStatus('Server fejl - prøv igen om lidt')
-        return
+        if (syncAll && batchCount > 1) {
+          setStripeStatus(`Henter batch ${batchCount}... (${totalImported} importeret, ${totalSkipped} sprunget over)`)
+        }
+
+        const res = await fetch(syncUrl, { method: 'POST' })
+
+        // Check if response is JSON
+        const contentType = res.headers.get('content-type')
+        if (!contentType || !contentType.includes('application/json')) {
+          const text = await res.text()
+          console.error('Non-JSON response:', text.substring(0, 200))
+          setStripeStatus('Server fejl - prøv igen om lidt')
+          return
+        }
+
+        const result = await res.json()
+
+        if (result.error) {
+          setStripeStatus(`Fejl: ${result.error}`)
+          return
+        }
+
+        totalFound += result.foundCharges || 0
+        totalImported += result.imported || 0
+        totalSkipped += result.skippedExisting || 0
+
+        // Continue if syncAll and there are more
+        if (syncAll && result.hasMore && result.nextCursor) {
+          cursor = result.nextCursor
+        } else {
+          cursor = null
+        }
+      } while (cursor)
+
+      // Final status
+      const parts = []
+      if (totalFound > 0) {
+        parts.push(`Fandt ${totalFound} charges`)
       }
-
-      const result = await res.json()
-
-      if (result.error) {
-        setStripeStatus(`Fejl: ${result.error}`)
-      } else {
-        const parts = []
-        if (result.foundCharges > 0) {
-          parts.push(`Fandt ${result.foundCharges} charges`)
-        }
-        if (result.imported > 0) {
-          parts.push(`${result.imported} nye importeret`)
-        }
-        if (result.skippedExisting > 0) {
-          parts.push(`${result.skippedExisting} allerede importeret`)
-        }
-        if (parts.length === 0) {
-          parts.push(`Ingen Stripe transaktioner fundet for ${year}`)
-        }
-        setStripeStatus(parts.join(', '))
+      if (totalImported > 0) {
+        parts.push(`${totalImported} nye importeret`)
       }
+      if (totalSkipped > 0) {
+        parts.push(`${totalSkipped} allerede importeret`)
+      }
+      if (parts.length === 0) {
+        parts.push(`Ingen Stripe transaktioner fundet for ${year}`)
+      }
+      setStripeStatus(parts.join(', '))
     } catch (error) {
       console.error('Stripe sync error:', error)
       setStripeStatus(`Kunne ikke synkronisere: ${error instanceof Error ? error.message : 'Ukendt fejl'}`)
@@ -633,14 +664,22 @@ export default function SettingsPage() {
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                   <Button
                     variant="outline"
-                    onClick={syncStripe}
+                    onClick={() => syncStripe(false)}
                     disabled={!settings.hasStripeKey || stripeSyncing}
                   >
                     <RefreshCw className={`mr-2 h-4 w-4 ${stripeSyncing ? 'animate-spin' : ''}`} />
-                    {stripeSyncing ? 'Synkroniserer...' : `Synkroniser ${settings.activeFiscalYear || new Date().getFullYear()}`}
+                    {stripeSyncing ? 'Synkroniserer...' : `Synkroniser 100`}
+                  </Button>
+                  <Button
+                    variant="default"
+                    onClick={() => syncStripe(true)}
+                    disabled={!settings.hasStripeKey || stripeSyncing}
+                  >
+                    <RefreshCw className={`mr-2 h-4 w-4 ${stripeSyncing ? 'animate-spin' : ''}`} />
+                    {stripeSyncing ? 'Synkroniserer...' : `Synkroniser alle (${settings.activeFiscalYear || new Date().getFullYear()})`}
                   </Button>
                   {stripeStatus && (
                     <span className={`text-sm ${stripeStatus.includes('Fejl') ? 'text-red-600' : 'text-green-600'}`}>

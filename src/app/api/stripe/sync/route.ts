@@ -14,7 +14,7 @@ interface StripeListResponse<T> {
 async function fetchStripeItems<T extends { id: string }>(
   baseUrl: string,
   apiKey: string
-): Promise<T[]> {
+): Promise<{ items: T[]; hasMore: boolean; lastId: string | null }> {
   const response = await fetch(baseUrl, {
     headers: {
       Authorization: `Bearer ${apiKey}`,
@@ -27,7 +27,8 @@ async function fetchStripeItems<T extends { id: string }>(
   }
 
   const data: StripeListResponse<T> = await response.json()
-  return data.data
+  const lastId = data.data.length > 0 ? data.data[data.data.length - 1].id : null
+  return { items: data.data, hasMore: data.has_more, lastId }
 }
 
 export async function POST(request: NextRequest) {
@@ -39,10 +40,11 @@ export async function POST(request: NextRequest) {
 
     const companyId = context.companyId
 
-    // Get year parameter from query string
+    // Get parameters from query string
     const { searchParams } = new URL(request.url)
     const yearParam = searchParams.get('year')
     const year = yearParam ? parseInt(yearParam, 10) : null
+    const cursor = searchParams.get('cursor') // For pagination
 
     // Build date filter for Stripe API (uses Unix timestamps)
     let dateFilter = ''
@@ -51,6 +53,9 @@ export async function POST(request: NextRequest) {
       const startOfNextYear = Math.floor(new Date(year + 1, 0, 1).getTime() / 1000)
       dateFilter = `&created[gte]=${startOfYear}&created[lt]=${startOfNextYear}`
     }
+
+    // Add cursor for pagination
+    const cursorParam = cursor ? `&starting_after=${cursor}` : ''
     // Get API key from settings
     const settings = await getSettings(companyId)
     const apiKey = settings.stripeSecretKey
@@ -62,7 +67,7 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Fetch all charges from Stripe with pagination
+    // Fetch charges from Stripe
     let charges: Array<{
       id: string
       paid: boolean
@@ -73,12 +78,26 @@ export async function POST(request: NextRequest) {
       created: number
       description?: string
     }>
+    let hasMore = false
+    let nextCursor: string | null = null
 
     try {
-      charges = await fetchStripeItems(
-        `https://api.stripe.com/v1/charges?limit=100${dateFilter}`,
+      const result = await fetchStripeItems<{
+        id: string
+        paid: boolean
+        refunded: boolean
+        receipt_url?: string
+        billing_details?: { name?: string }
+        amount: number
+        created: number
+        description?: string
+      }>(
+        `https://api.stripe.com/v1/charges?limit=100${dateFilter}${cursorParam}`,
         apiKey
       )
+      charges = result.items
+      hasMore = result.hasMore
+      nextCursor = result.lastId
     } catch (error) {
       return NextResponse.json(
         { error: error instanceof Error ? error.message : 'Stripe API fejl' },
@@ -173,10 +192,19 @@ export async function POST(request: NextRequest) {
     }> = []
 
     try {
-      invoices = await fetchStripeItems(
+      const invoiceResult = await fetchStripeItems<{
+        id: string
+        invoice_pdf?: string
+        number?: string
+        customer_name?: string
+        customer_email?: string
+        amount_paid: number
+        created: number
+      }>(
         `https://api.stripe.com/v1/invoices?limit=100&status=paid${dateFilter}`,
         apiKey
       )
+      invoices = invoiceResult.items
     } catch {
       // Continue even if invoices fail - we still have charges
     }
@@ -252,7 +280,9 @@ export async function POST(request: NextRequest) {
       imported,
       foundCharges,
       skippedExisting,
-      skippedUnpaid
+      skippedUnpaid,
+      hasMore,
+      nextCursor
     })
   } catch (error) {
     console.error('Stripe sync error:', error)
