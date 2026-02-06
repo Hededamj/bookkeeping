@@ -479,6 +479,7 @@ export default function SettingsPage() {
 
       // Final status
       const parts = []
+      parts.push(`✓ Færdig!`)
       if (totalFound > 0) {
         parts.push(`Fandt ${totalFound} charges`)
       }
@@ -488,10 +489,15 @@ export default function SettingsPage() {
       if (totalSkipped > 0) {
         parts.push(`${totalSkipped} allerede importeret`)
       }
-      if (parts.length === 0) {
+      const skippedUnpaid = totalFound - totalImported - totalSkipped
+      if (skippedUnpaid > 0) {
+        parts.push(`${skippedUnpaid} ubetalte/refunderede`)
+      }
+      if (totalFound === 0) {
+        parts.length = 0
         parts.push(`Ingen Stripe transaktioner fundet for ${year}`)
       }
-      setStripeStatus(parts.join(', '))
+      setStripeStatus(parts.join(' • '))
     } catch (error) {
       console.error('Stripe sync error:', error)
       setStripeStatus(`Kunne ikke synkronisere: ${error instanceof Error ? error.message : 'Ukendt fejl'}`)
