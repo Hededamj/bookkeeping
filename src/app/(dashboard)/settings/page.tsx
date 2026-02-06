@@ -446,7 +446,20 @@ export default function SettingsPage() {
       if (result.error) {
         setStripeStatus(`Fejl: ${result.error}`)
       } else {
-        setStripeStatus(`Synkroniseret ${result.imported} transaktioner fra ${year}`)
+        const parts = []
+        if (result.foundCharges > 0) {
+          parts.push(`Fandt ${result.foundCharges} charges`)
+        }
+        if (result.imported > 0) {
+          parts.push(`${result.imported} nye importeret`)
+        }
+        if (result.skippedExisting > 0) {
+          parts.push(`${result.skippedExisting} allerede importeret`)
+        }
+        if (parts.length === 0) {
+          parts.push(`Ingen Stripe transaktioner fundet for ${year}`)
+        }
+        setStripeStatus(parts.join(', '))
       }
     } catch (error) {
       console.error('Stripe sync error:', error)

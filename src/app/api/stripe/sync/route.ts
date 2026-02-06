@@ -87,10 +87,16 @@ export async function POST(request: NextRequest) {
     }
 
     let imported = 0
+    let skippedExisting = 0
+    let skippedUnpaid = 0
+    const foundCharges = charges.length
 
     for (const charge of charges) {
       // Skip if not paid
-      if (!charge.paid || charge.refunded) continue
+      if (!charge.paid || charge.refunded) {
+        skippedUnpaid++
+        continue
+      }
 
       // Check if already imported
       const existing = await prisma.transaction.findFirst({
@@ -99,6 +105,7 @@ export async function POST(request: NextRequest) {
       })
 
       if (existing) {
+        skippedExisting++
         // If transaction exists but has no receipt, try to add one
         if (!existing.receipt && charge.receipt_url) {
           const receipt = await prisma.receipt.create({
@@ -241,7 +248,12 @@ export async function POST(request: NextRequest) {
     // The actual income is recorded via charges and invoices above.
     // Bank imports will show the payout as a deposit, which can be matched.
 
-    return NextResponse.json({ imported })
+    return NextResponse.json({
+      imported,
+      foundCharges,
+      skippedExisting,
+      skippedUnpaid
+    })
   } catch (error) {
     console.error('Stripe sync error:', error)
     const errorMessage = error instanceof Error ? error.message : 'Ukendt fejl'
