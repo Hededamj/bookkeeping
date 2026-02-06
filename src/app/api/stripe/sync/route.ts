@@ -72,6 +72,7 @@ export async function POST(request: NextRequest) {
       id: string
       paid: boolean
       refunded: boolean
+      amount_refunded: number
       receipt_url?: string
       billing_details?: { name?: string }
       amount: number
@@ -86,6 +87,7 @@ export async function POST(request: NextRequest) {
         id: string
         paid: boolean
         refunded: boolean
+        amount_refunded: number
         receipt_url?: string
         billing_details?: { name?: string }
         amount: number
@@ -111,13 +113,13 @@ export async function POST(request: NextRequest) {
     const foundCharges = charges.length
 
     for (const charge of charges) {
-      // Skip if not paid
-      if (!charge.paid || charge.refunded) {
+      // Skip if not paid at all
+      if (!charge.paid) {
         skippedUnpaid++
         continue
       }
 
-      // Check if already imported
+      // Check if charge already imported
       const existing = await prisma.transaction.findFirst({
         where: { companyId, externalId: charge.id },
         include: { receipt: true },
@@ -143,41 +145,63 @@ export async function POST(request: NextRequest) {
             data: { receiptId: receipt.id, matched: true },
           })
         }
-        continue
-      }
+      } else {
+        // Create receipt if receipt_url exists
+        let receiptId: string | null = null
+        if (charge.receipt_url) {
+          const receipt = await prisma.receipt.create({
+            data: {
+              companyId,
+              imageUrl: charge.receipt_url,
+              fileName: `Stripe kvittering - ${charge.id}.html`,
+              notes: `Stripe kvittering for ${charge.billing_details?.name || 'betaling'}`,
+              ocrAmount: charge.amount / 100,
+              ocrDate: new Date(charge.created * 1000),
+              ocrVendor: charge.billing_details?.name || 'Stripe',
+            },
+          })
+          receiptId = receipt.id
+        }
 
-      // Create receipt if receipt_url exists
-      let receiptId: string | null = null
-      if (charge.receipt_url) {
-        const receipt = await prisma.receipt.create({
+        // Create transaction with linked receipt
+        await prisma.transaction.create({
           data: {
             companyId,
-            imageUrl: charge.receipt_url,
-            fileName: `Stripe kvittering - ${charge.id}.html`,
-            notes: `Stripe kvittering for ${charge.billing_details?.name || 'betaling'}`,
-            ocrAmount: charge.amount / 100,
-            ocrDate: new Date(charge.created * 1000),
-            ocrVendor: charge.billing_details?.name || 'Stripe',
+            date: new Date(charge.created * 1000),
+            description: charge.description || `Stripe: ${charge.billing_details?.name || 'Betaling'}`,
+            amount: charge.amount / 100, // Stripe amounts are in cents
+            source: 'STRIPE',
+            externalId: charge.id,
+            receiptId: receiptId,
+            matched: !!receiptId,
           },
         })
-        receiptId = receipt.id
+
+        imported++
       }
 
-      // Create transaction with linked receipt
-      await prisma.transaction.create({
-        data: {
-          companyId,
-          date: new Date(charge.created * 1000),
-          description: charge.description || `Stripe: ${charge.billing_details?.name || 'Betaling'}`,
-          amount: charge.amount / 100, // Stripe amounts are in cents
-          source: 'STRIPE',
-          externalId: charge.id,
-          receiptId: receiptId,
-          matched: !!receiptId,
-        },
-      })
+      // If charge was refunded, also create a refund transaction
+      if (charge.refunded && charge.amount_refunded > 0) {
+        const refundExternalId = `refund_${charge.id}`
+        const existingRefund = await prisma.transaction.findFirst({
+          where: { companyId, externalId: refundExternalId },
+        })
 
-      imported++
+        if (!existingRefund) {
+          await prisma.transaction.create({
+            data: {
+              companyId,
+              date: new Date(charge.created * 1000),
+              description: `Stripe refundering: ${charge.billing_details?.name || charge.description || 'Refundering'}`,
+              amount: -(charge.amount_refunded / 100), // Negative amount for refund
+              source: 'STRIPE',
+              externalId: refundExternalId,
+              matched: true, // Refunds don't need receipts
+            },
+          })
+          imported++
+        }
+      }
     }
 
     // Fetch all invoices with pagination
