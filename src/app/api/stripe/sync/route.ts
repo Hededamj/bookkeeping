@@ -135,6 +135,7 @@ export async function POST(request: NextRequest) {
               imageUrl: charge.receipt_url,
               fileName: `Stripe kvittering - ${charge.id}.html`,
               notes: `Stripe kvittering for ${charge.billing_details?.name || 'betaling'}`,
+              ocrStatus: 'completed', // Already have data from Stripe API
               ocrAmount: charge.amount / 100,
               ocrDate: new Date(charge.created * 1000),
               ocrVendor: charge.billing_details?.name || 'Stripe',
@@ -155,6 +156,7 @@ export async function POST(request: NextRequest) {
               imageUrl: charge.receipt_url,
               fileName: `Stripe kvittering - ${charge.id}.html`,
               notes: `Stripe kvittering for ${charge.billing_details?.name || 'betaling'}`,
+              ocrStatus: 'completed', // Already have data from Stripe API
               ocrAmount: charge.amount / 100,
               ocrDate: new Date(charge.created * 1000),
               ocrVendor: charge.billing_details?.name || 'Stripe',
@@ -250,6 +252,7 @@ export async function POST(request: NextRequest) {
               imageUrl: invoice.invoice_pdf,
               fileName: `Stripe faktura - ${invoice.number || invoice.id}.pdf`,
               notes: `Stripe faktura ${invoice.number || ''} - ${invoice.customer_name || invoice.customer_email || 'Kunde'}`,
+              ocrStatus: 'completed', // Already have data from Stripe API
               ocrAmount: invoice.amount_paid / 100,
               ocrDate: new Date(invoice.created * 1000),
               ocrVendor: invoice.customer_name || invoice.customer_email || 'Stripe kunde',
@@ -272,6 +275,7 @@ export async function POST(request: NextRequest) {
             imageUrl: invoice.invoice_pdf,
             fileName: `Stripe faktura - ${invoice.number || invoice.id}.pdf`,
             notes: `Stripe faktura ${invoice.number || ''} - ${invoice.customer_name || invoice.customer_email || 'Kunde'}`,
+            ocrStatus: 'completed', // Already have data from Stripe API
             ocrAmount: invoice.amount_paid / 100,
             ocrDate: new Date(invoice.created * 1000),
             ocrVendor: invoice.customer_name || invoice.customer_email || 'Stripe kunde',
