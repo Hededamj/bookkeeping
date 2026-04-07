@@ -506,6 +506,28 @@ export default function SettingsPage() {
     }
   }
 
+  const backfillStripeReceipts = async () => {
+    if (!settings.hasStripeKey) {
+      setStripeStatus('Tilføj Stripe API-nøgle først')
+      return
+    }
+    setStripeSyncing(true)
+    setStripeStatus('Konverterer Stripe-kvitteringer til PDF...')
+    try {
+      const res = await fetch('/api/stripe/backfill-receipts', { method: 'POST' })
+      const data = await res.json()
+      if (!res.ok) {
+        setStripeStatus(`Fejl: ${data.error || 'Ukendt fejl'}`)
+      } else {
+        setStripeStatus(`✓ Konverteret ${data.updated}/${data.scanned} kvitteringer til PDF${data.failed ? ` (${data.failed} fejlede)` : ''}`)
+      }
+    } catch (error) {
+      setStripeStatus(`Fejl: ${error instanceof Error ? error.message : 'Ukendt'}`)
+    } finally {
+      setStripeSyncing(false)
+    }
+  }
+
   const copyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text)
   }
@@ -686,6 +708,14 @@ export default function SettingsPage() {
                   >
                     <RefreshCw className={`mr-2 h-4 w-4 ${stripeSyncing ? 'animate-spin' : ''}`} />
                     {stripeSyncing ? 'Synkroniserer...' : `Synkroniser alle (${settings.activeFiscalYear || new Date().getFullYear()})`}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={backfillStripeReceipts}
+                    disabled={!settings.hasStripeKey || stripeSyncing}
+                  >
+                    <RefreshCw className={`mr-2 h-4 w-4 ${stripeSyncing ? 'animate-spin' : ''}`} />
+                    Konverter eksisterende til PDF
                   </Button>
                   {stripeStatus && (
                     <span className={`text-sm ${stripeStatus.includes('Fejl') ? 'text-red-600' : 'text-green-600'}`}>

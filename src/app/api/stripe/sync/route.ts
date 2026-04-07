@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getSettings } from '@/lib/settings'
 import { getCompanyContext } from '@/lib/company'
+import { generateStripeReceiptPdf } from '@/lib/stripe-receipt-pdf'
 
 // Increase timeout for this route (max 60s on Vercel Pro, 10s on Hobby)
 export const maxDuration = 60
@@ -68,32 +69,27 @@ export async function POST(request: NextRequest) {
     }
 
     // Fetch charges from Stripe
-    let charges: Array<{
+    type StripeCharge = {
       id: string
       paid: boolean
       refunded: boolean
       amount_refunded: number
       receipt_url?: string
-      billing_details?: { name?: string }
+      receipt_number?: string | null
+      currency: string
+      statement_descriptor?: string | null
+      billing_details?: { name?: string; email?: string }
+      payment_method_details?: { card?: { brand?: string; last4?: string } }
       amount: number
       created: number
       description?: string
-    }>
+    }
+    let charges: StripeCharge[]
     let hasMore = false
     let nextCursor: string | null = null
 
     try {
-      const result = await fetchStripeItems<{
-        id: string
-        paid: boolean
-        refunded: boolean
-        amount_refunded: number
-        receipt_url?: string
-        billing_details?: { name?: string }
-        amount: number
-        created: number
-        description?: string
-      }>(
+      const result = await fetchStripeItems<StripeCharge>(
         `https://api.stripe.com/v1/charges?limit=100${dateFilter}${cursorParam}`,
         apiKey
       )
@@ -125,15 +121,31 @@ export async function POST(request: NextRequest) {
         include: { receipt: true },
       })
 
+      // Build PDF for this charge once (used by both branches)
+      const buildChargePdf = () => generateStripeReceiptPdf({
+        chargeId: charge.id,
+        amount: charge.amount / 100,
+        currency: charge.currency,
+        created: new Date(charge.created * 1000),
+        customerName: charge.billing_details?.name,
+        customerEmail: charge.billing_details?.email,
+        description: charge.description,
+        receiptNumber: charge.receipt_number,
+        cardBrand: charge.payment_method_details?.card?.brand,
+        cardLast4: charge.payment_method_details?.card?.last4,
+        statementDescriptor: charge.statement_descriptor,
+      })
+
       if (existing) {
         skippedExisting++
         // If transaction exists but has no receipt, try to add one
         if (!existing.receipt && charge.receipt_url) {
+          const pdfDataUrl = await buildChargePdf()
           const receipt = await prisma.receipt.create({
             data: {
               companyId,
-              imageUrl: charge.receipt_url,
-              fileName: `Stripe kvittering - ${charge.id}.html`,
+              imageUrl: pdfDataUrl,
+              fileName: `Stripe kvittering - ${charge.id}.pdf`,
               notes: `Stripe kvittering for ${charge.billing_details?.name || 'betaling'}`,
               ocrStatus: 'completed', // Already have data from Stripe API
               ocrAmount: charge.amount / 100,
@@ -150,11 +162,12 @@ export async function POST(request: NextRequest) {
         // Create receipt if receipt_url exists
         let receiptId: string | null = null
         if (charge.receipt_url) {
+          const pdfDataUrl = await buildChargePdf()
           const receipt = await prisma.receipt.create({
             data: {
               companyId,
-              imageUrl: charge.receipt_url,
-              fileName: `Stripe kvittering - ${charge.id}.html`,
+              imageUrl: pdfDataUrl,
+              fileName: `Stripe kvittering - ${charge.id}.pdf`,
               notes: `Stripe kvittering for ${charge.billing_details?.name || 'betaling'}`,
               ocrStatus: 'completed', // Already have data from Stripe API
               ocrAmount: charge.amount / 100,

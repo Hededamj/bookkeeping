@@ -538,12 +538,12 @@ export default function ReportsPage() {
         {/* VAT/Moms Tab */}
         <TabsContent value="vat" className="space-y-4">
           <div className="flex items-center gap-4 mb-4">
-            <Select value={vatQuarter} onValueChange={setVatQuarter}>
+            <Select value={vatQuarter || 'all'} onValueChange={(v) => setVatQuarter(v === 'all' ? '' : v)}>
               <SelectTrigger className="w-[180px]">
                 <SelectValue placeholder="Vælg kvartal (valgfrit)" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="">Hele året</SelectItem>
+                <SelectItem value="all">Hele året</SelectItem>
                 <SelectItem value="Q1">Q1 (jan-mar)</SelectItem>
                 <SelectItem value="Q2">Q2 (apr-jun)</SelectItem>
                 <SelectItem value="Q3">Q3 (jul-sep)</SelectItem>
