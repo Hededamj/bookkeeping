@@ -23,11 +23,22 @@ export async function GET(request: NextRequest) {
     select: { name: true, cvr: true },
   })
 
-  // Fetch all receipts for the year
+  // Fetch all receipts for the year.
+  // Filter by the actual receipt date (ocrDate) so Stripe imports land in the
+  // right year even if they were imported later. Fall back to createdAt for
+  // receipts that never got an ocrDate.
   const receipts = await prisma.receipt.findMany({
     where: {
       companyId: context.companyId,
-      createdAt: { gte: startDate, lte: endDate },
+      OR: [
+        { ocrDate: { gte: startDate, lte: endDate } },
+        {
+          AND: [
+            { ocrDate: null },
+            { createdAt: { gte: startDate, lte: endDate } },
+          ],
+        },
+      ],
     },
     include: {
       transactions: {
