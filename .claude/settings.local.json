@@ -11,7 +11,11 @@
       "Bash(npx prisma db push:*)",
       "Bash(npm run dev:*)",
       "Bash(git push:*)",
-      "Bash(git restore:*)"
+      "Bash(git restore:*)",
+      "Bash(timeout /t 8 /nobreak)",
+      "Bash(gh api:*)",
+      "Bash(npx tsx:*)",
+      "Bash(node -e:*)"
     ]
   }
 }

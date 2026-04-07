@@ -513,14 +513,38 @@ export default function SettingsPage() {
     }
     setStripeSyncing(true)
     setStripeStatus('Konverterer Stripe-kvitteringer til PDF...')
+
+    let totalUpdated = 0
+    let totalFailed = 0
+    let totalSkipped = 0
+    let iterations = 0
+    const maxIterations = 100
+
     try {
-      const res = await fetch('/api/stripe/backfill-receipts', { method: 'POST' })
-      const data = await res.json()
-      if (!res.ok) {
-        setStripeStatus(`Fejl: ${data.error || 'Ukendt fejl'}`)
-      } else {
-        setStripeStatus(`✓ Konverteret ${data.updated}/${data.scanned} kvitteringer til PDF${data.failed ? ` (${data.failed} fejlede)` : ''}`)
+      while (iterations < maxIterations) {
+        iterations++
+        const res = await fetch('/api/stripe/backfill-receipts', { method: 'POST' })
+        const text = await res.text()
+        let data: { error?: string; updated?: number; failed?: number; skipped?: number; scanned?: number; hasMore?: boolean; totalRemaining?: number }
+        try {
+          data = JSON.parse(text)
+        } catch {
+          setStripeStatus(`Fejl: Uventet svar fra server (${res.status}): ${text.slice(0, 100)}`)
+          return
+        }
+        if (!res.ok) {
+          setStripeStatus(`Fejl efter ${totalUpdated} konverterede: ${data.error || 'Ukendt fejl'}`)
+          return
+        }
+        totalUpdated += data.updated || 0
+        totalFailed += data.failed || 0
+        totalSkipped += data.skipped || 0
+
+        setStripeStatus(`Konverterer... ${totalUpdated} færdig, ${data.totalRemaining || 0} tilbage`)
+
+        if (!data.hasMore || (data.updated === 0 && data.skipped === 0)) break
       }
+      setStripeStatus(`✓ Konverteret ${totalUpdated} kvitteringer til PDF${totalFailed ? ` (${totalFailed} fejlede)` : ''}${totalSkipped ? ` (${totalSkipped} sprunget over)` : ''}`)
     } catch (error) {
       setStripeStatus(`Fejl: ${error instanceof Error ? error.message : 'Ukendt'}`)
     } finally {
