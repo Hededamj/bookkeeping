@@ -136,6 +136,7 @@ export default function ReceiptsPage() {
   const [page, setPage] = useState(1)
   const [totalPages, setTotalPages] = useState(1)
   const [total, setTotal] = useState(0)
+  const [reparsing, setReparsing] = useState(false)
 
   // Editable fields for selected receipt
   const [editVendor, setEditVendor] = useState<string>('')
@@ -349,6 +350,31 @@ export default function ReceiptsPage() {
     }
   }
 
+  const reparseAll = async () => {
+    if (!confirm('Kør parser igen på alle bilag der mangler beløb eller dato?\n\nGoogle Vision-tekst genbruges, så det koster ikke noget. Manuelle indtastninger bevares.')) return
+
+    setReparsing(true)
+    try {
+      const res = await fetch('/api/receipts/reparse', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ onlyMissing: true }),
+      })
+      const data = await res.json()
+      if (res.ok) {
+        alert(`Færdig.\n\nGennemgået: ${data.scanned}\nOpdateret: ${data.updated}\nUændrede: ${data.unchanged}`)
+        fetchReceipts(page, searchDebounced)
+      } else {
+        alert(`Fejl: ${data.error || 'Ukendt fejl'}`)
+      }
+    } catch (error) {
+      console.error('Reparse error:', error)
+      alert('Kunne ikke køre parser igen')
+    } finally {
+      setReparsing(false)
+    }
+  }
+
   const handleUpload = async (files: FileList | null) => {
     if (!files || files.length === 0) return
 
@@ -496,14 +522,34 @@ export default function ReceiptsPage() {
               <CardTitle>Alle bilag</CardTitle>
               <CardDescription>{total} bilag i alt</CardDescription>
             </div>
-            <div className="relative">
-              <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder="Søg i bilag..."
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                className="pl-8"
-              />
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={reparseAll}
+                disabled={reparsing}
+              >
+                {reparsing ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Re-parser...
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="mr-2 h-4 w-4" />
+                    Re-parser manglende
+                  </>
+                )}
+              </Button>
+              <div className="relative">
+                <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="Søg i bilag..."
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  className="pl-8"
+                />
+              </div>
             </div>
           </div>
         </CardHeader>
