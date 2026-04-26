@@ -24,6 +24,18 @@ import {
 } from '@/components/ui/select'
 import { Label } from '@/components/ui/label'
 import { Pagination } from '@/components/ui/pagination'
+import { detectCurrency } from '@/lib/ocr-parser'
+
+// Approximate fixed conversion rates against DKK. Quick-and-dirty for receipt
+// conversion — for accurate accounting use the bank-provided rate from the
+// matched transaction.
+const DKK_RATES: Record<string, number> = {
+  EUR: 7.46,
+  USD: 6.85,
+  GBP: 8.70,
+  SEK: 0.66,
+  NOK: 0.65,
+}
 
 type Vendor = {
   id: string
@@ -811,6 +823,37 @@ export default function ReceiptsPage() {
                     value={editAmount}
                     onChange={(e) => setEditAmount(e.target.value)}
                   />
+                  {(() => {
+                    const detected = selectedReceipt.ocrText ? detectCurrency(selectedReceipt.ocrText) : null
+                    if (!detected || detected === 'DKK') return null
+                    const rate = DKK_RATES[detected]
+                    if (!rate) return null
+                    const current = parseFloat(editAmount)
+                    const converted = isNaN(current) ? null : current * rate
+                    return (
+                      <div className="flex items-center justify-between gap-2 rounded-md border border-amber-200 bg-amber-50 p-2 text-xs">
+                        <span className="text-amber-900">
+                          Bilag i {detected} — kurs {rate.toString().replace('.', ',')}
+                          {converted !== null && (
+                            <> → <strong>{converted.toFixed(2).replace('.', ',')} DKK</strong></>
+                          )}
+                        </span>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={() => {
+                            if (!isNaN(current)) {
+                              setEditAmount((current * rate).toFixed(2))
+                            }
+                          }}
+                          disabled={isNaN(current)}
+                        >
+                          Konverter
+                        </Button>
+                      </div>
+                    )
+                  })()}
                 </div>
 
                 {/* Date */}

@@ -8,6 +8,21 @@ export interface OcrParseResult {
   vendor: string | null
 }
 
+export type DetectedCurrency = 'DKK' | 'EUR' | 'USD' | 'GBP' | 'SEK' | 'NOK' | null
+
+// Heuristic: scan OCR text for currency markers. DKK takes precedence
+// because Danish receipts often include "kr" alongside other currencies.
+export function detectCurrency(text: string): DetectedCurrency {
+  if (!text) return null
+  if (/\b(?:DKK|kr\.?)\b/i.test(text)) return 'DKK'
+  if (/€|\bEUR\b/.test(text)) return 'EUR'
+  if (/\$|\bUSD\b/.test(text)) return 'USD'
+  if (/£|\bGBP\b/.test(text)) return 'GBP'
+  if (/\bSEK\b/i.test(text)) return 'SEK'
+  if (/\bNOK\b/i.test(text)) return 'NOK'
+  return null
+}
+
 // Amount number subpattern: optional thousand separators, optional decimals, optional ",-" suffix
 // Captures: 1234 | 1.234 | 1,234.56 | 1.234,56 | 1234,56 | 500,-
 // Try grouped form first (requires at least one separator), fall back to plain digits.
