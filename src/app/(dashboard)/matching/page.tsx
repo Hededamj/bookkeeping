@@ -20,8 +20,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { formatCurrency, formatDate } from '@/lib/utils'
-import { Link2, CheckCircle2, Wand2, Image as ImageIcon, ExternalLink } from 'lucide-react'
-import { PdfThumbnail } from '@/components/pdf-thumbnail'
+import { Link2, CheckCircle2, Wand2, Image as ImageIcon, ExternalLink, FileText } from 'lucide-react'
 
 // Helper to check if URL is a PDF
 const isPdf = (url: string, fileName: string | null): boolean => {
@@ -172,7 +171,9 @@ export default function MatchingPage() {
                     <div className="flex items-center gap-4">
                       <div className="h-16 w-12 overflow-hidden rounded">
                         {isPdf(receipt.imageUrl, receipt.fileName) ? (
-                          <PdfThumbnail url={receipt.imageUrl} />
+                          <div className="flex flex-col items-center justify-center h-full bg-gradient-to-br from-red-500/10 to-red-600/20">
+                            <FileText className="h-6 w-6 text-red-600" />
+                          </div>
                         ) : isStripeReceipt(receipt.imageUrl, receipt.fileName) ? (
                           <div className="flex flex-col items-center justify-center h-full bg-gradient-to-br from-violet-500/20 to-violet-600/30">
                             <svg className="h-6 w-6 text-violet-600" viewBox="0 0 24 24" fill="currentColor">
@@ -326,7 +327,10 @@ export default function MatchingPage() {
                 >
                   <div className="aspect-[3/4] overflow-hidden">
                     {isPdf(receipt.imageUrl, receipt.fileName) ? (
-                      <PdfThumbnail url={receipt.imageUrl} />
+                      <div className="flex flex-col items-center justify-center h-full bg-gradient-to-br from-red-500/10 to-red-600/20">
+                        <FileText className="h-12 w-12 text-red-600" />
+                        <span className="mt-2 text-xs font-medium text-red-700">PDF</span>
+                      </div>
                     ) : isStripeReceipt(receipt.imageUrl, receipt.fileName) ? (
                       <div className="flex flex-col items-center justify-center h-full bg-gradient-to-br from-violet-500/20 to-violet-600/30">
                         <svg className="h-12 w-12 text-violet-600" viewBox="0 0 24 24" fill="currentColor">
