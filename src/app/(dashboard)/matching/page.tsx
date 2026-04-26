@@ -20,7 +20,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { formatCurrency, formatDate } from '@/lib/utils'
-import { Link2, CheckCircle2, Wand2, Image as ImageIcon, ExternalLink, FileText } from 'lucide-react'
+import { Link2, CheckCircle2, Wand2, Image as ImageIcon, ExternalLink } from 'lucide-react'
 
 // Helper to check if URL is a PDF
 const isPdf = (url: string, fileName: string | null): boolean => {
@@ -169,11 +169,13 @@ export default function MatchingPage() {
                     className="flex items-center justify-between rounded-lg border bg-background p-3"
                   >
                     <div className="flex items-center gap-4">
-                      <div className="h-16 w-12 overflow-hidden rounded">
+                      <div className="h-16 w-12 overflow-hidden rounded bg-white">
                         {isPdf(receipt.imageUrl, receipt.fileName) ? (
-                          <div className="flex flex-col items-center justify-center h-full bg-gradient-to-br from-red-500/10 to-red-600/20">
-                            <FileText className="h-6 w-6 text-red-600" />
-                          </div>
+                          <iframe
+                            src={`${receipt.imageUrl}#toolbar=0&navpanes=0&scrollbar=0&view=FitH`}
+                            className="h-full w-full pointer-events-none border-0"
+                            title="Bilag preview"
+                          />
                         ) : isStripeReceipt(receipt.imageUrl, receipt.fileName) ? (
                           <div className="flex flex-col items-center justify-center h-full bg-gradient-to-br from-violet-500/20 to-violet-600/30">
                             <svg className="h-6 w-6 text-violet-600" viewBox="0 0 24 24" fill="currentColor">
@@ -325,12 +327,13 @@ export default function MatchingPage() {
                     matchTransactionToReceipt(selectedTransaction.id, receipt.id)
                   }
                 >
-                  <div className="aspect-[3/4] overflow-hidden">
+                  <div className="aspect-[3/4] overflow-hidden bg-white">
                     {isPdf(receipt.imageUrl, receipt.fileName) ? (
-                      <div className="flex flex-col items-center justify-center h-full bg-gradient-to-br from-red-500/10 to-red-600/20">
-                        <FileText className="h-12 w-12 text-red-600" />
-                        <span className="mt-2 text-xs font-medium text-red-700">PDF</span>
-                      </div>
+                      <iframe
+                        src={`${receipt.imageUrl}#toolbar=0&navpanes=0&scrollbar=0&view=FitH`}
+                        className="h-full w-full pointer-events-none border-0"
+                        title="Bilag preview"
+                      />
                     ) : isStripeReceipt(receipt.imageUrl, receipt.fileName) ? (
                       <div className="flex flex-col items-center justify-center h-full bg-gradient-to-br from-violet-500/20 to-violet-600/30">
                         <svg className="h-12 w-12 text-violet-600" viewBox="0 0 24 24" fill="currentColor">
