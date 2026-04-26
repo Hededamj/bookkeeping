@@ -317,55 +317,68 @@ export default function MatchingPage() {
               <p className="text-muted-foreground">Ingen ledige bilag</p>
             </div>
           ) : (
-            <div className="grid max-h-96 gap-4 overflow-y-auto sm:grid-cols-2 lg:grid-cols-3">
-              {receipts.map((receipt) => (
-                <div
-                  key={receipt.id}
-                  className="cursor-pointer overflow-hidden rounded-lg border transition-all hover:border-primary hover:shadow-md"
-                  onClick={() =>
-                    selectedTransaction &&
-                    matchTransactionToReceipt(selectedTransaction.id, receipt.id)
-                  }
-                >
-                  <div className="aspect-[3/4] overflow-hidden bg-white">
-                    {isPdf(receipt.imageUrl, receipt.fileName) ? (
-                      <iframe
-                        src={`${receipt.imageUrl}#toolbar=0&navpanes=0&scrollbar=0&view=FitH`}
-                        className="h-full w-full pointer-events-none border-0"
-                        title="Bilag preview"
-                      />
-                    ) : isStripeReceipt(receipt.imageUrl, receipt.fileName) ? (
-                      <div className="flex flex-col items-center justify-center h-full bg-gradient-to-br from-violet-500/20 to-violet-600/30">
-                        <svg className="h-12 w-12 text-violet-600" viewBox="0 0 24 24" fill="currentColor">
-                          <path d="M13.976 9.15c-2.172-.806-3.356-1.426-3.356-2.409 0-.831.683-1.305 1.901-1.305 2.227 0 4.515.858 6.09 1.631l.89-5.494C18.252.975 15.697 0 12.165 0 9.667 0 7.589.654 6.104 1.872 4.56 3.147 3.757 4.992 3.757 7.218c0 4.039 2.467 5.76 6.476 7.219 2.585.92 3.445 1.574 3.445 2.583 0 .98-.84 1.545-2.354 1.545-1.875 0-4.965-.921-6.99-2.109l-.9 5.555C5.175 22.99 8.385 24 11.714 24c2.641 0 4.843-.624 6.328-1.813 1.664-1.305 2.525-3.236 2.525-5.732 0-4.128-2.524-5.851-6.591-7.305z"/>
-                        </svg>
-                        <span className="mt-2 text-xs font-medium text-violet-700">Stripe</span>
-                      </div>
-                    ) : (
-                      <img
-                        src={receipt.imageUrl}
-                        alt="Bilag"
-                        className="h-full w-full object-cover"
-                      />
-                    )}
-                  </div>
-                  <div className="p-2">
-                    {receipt.ocrVendor && (
-                      <p className="text-sm font-medium">{receipt.ocrVendor}</p>
-                    )}
-                    {receipt.ocrAmount && (
-                      <p className="text-lg font-bold">
-                        {formatCurrency(parseFloat(receipt.ocrAmount))}
-                      </p>
-                    )}
-                    {receipt.ocrDate && (
-                      <p className="text-xs text-muted-foreground">
-                        {formatDate(receipt.ocrDate)}
-                      </p>
-                    )}
-                  </div>
-                </div>
-              ))}
+            <div className="max-h-[60vh] overflow-y-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Dato</TableHead>
+                    <TableHead>Leverandør</TableHead>
+                    <TableHead>Filnavn</TableHead>
+                    <TableHead className="text-right">Beløb</TableHead>
+                    <TableHead className="w-[100px]"></TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {receipts.map((receipt) => {
+                    const txAmount = selectedTransaction
+                      ? Math.abs(parseFloat(selectedTransaction.amount))
+                      : null
+                    const receiptAmount = receipt.ocrAmount
+                      ? Math.abs(parseFloat(receipt.ocrAmount))
+                      : null
+                    const amountMatch =
+                      txAmount !== null &&
+                      receiptAmount !== null &&
+                      Math.abs(txAmount - receiptAmount) < 0.01
+
+                    return (
+                      <TableRow
+                        key={receipt.id}
+                        className="cursor-pointer hover:bg-muted/50"
+                        onClick={() =>
+                          selectedTransaction &&
+                          matchTransactionToReceipt(selectedTransaction.id, receipt.id)
+                        }
+                      >
+                        <TableCell className="whitespace-nowrap">
+                          {receipt.ocrDate ? formatDate(receipt.ocrDate) : '—'}
+                        </TableCell>
+                        <TableCell className="max-w-[240px] truncate">
+                          {receipt.ocrVendor || <span className="text-muted-foreground">—</span>}
+                        </TableCell>
+                        <TableCell className="max-w-[200px] truncate text-xs text-muted-foreground">
+                          {receipt.fileName || '—'}
+                        </TableCell>
+                        <TableCell className="text-right font-medium whitespace-nowrap">
+                          {receipt.ocrAmount ? (
+                            <span className={amountMatch ? 'text-green-600' : ''}>
+                              {formatCurrency(parseFloat(receipt.ocrAmount))}
+                            </span>
+                          ) : (
+                            <span className="text-muted-foreground">—</span>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          <Button size="sm" variant="outline">
+                            <Link2 className="mr-1 h-3.5 w-3.5" />
+                            Vælg
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    )
+                  })}
+                </TableBody>
+              </Table>
             </div>
           )}
         </DialogContent>
