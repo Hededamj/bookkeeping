@@ -155,6 +155,10 @@ export default function ReceiptsPage() {
   const [editAmount, setEditAmount] = useState<string>('')
   const [editDate, setEditDate] = useState<string>('')
   const [newVendorName, setNewVendorName] = useState<string>('')
+  // Currency conversion is a toggle — track whether editAmount currently holds
+  // the converted DKK value so a second click reverses the conversion instead
+  // of multiplying by the rate again.
+  const [amountConverted, setAmountConverted] = useState(false)
 
   // Batch update dialog state
   const [batchUpdateDialog, setBatchUpdateDialog] = useState<{
@@ -186,6 +190,7 @@ export default function ReceiptsPage() {
       setEditAmount(selectedReceipt.ocrAmount || '')
       setEditDate(selectedReceipt.ocrDate ? selectedReceipt.ocrDate.split('T')[0] : '')
       setNewVendorName('')
+      setAmountConverted(false)
     }
   }, [selectedReceipt])
 
@@ -821,7 +826,12 @@ export default function ReceiptsPage() {
                     step="0.01"
                     placeholder="0.00"
                     value={editAmount}
-                    onChange={(e) => setEditAmount(e.target.value)}
+                    onChange={(e) => {
+                      setEditAmount(e.target.value)
+                      // Manual edits invalidate the "already converted" state so the
+                      // user can convert again from the new value.
+                      setAmountConverted(false)
+                    }}
                   />
                   {(() => {
                     const detected = selectedReceipt.ocrText ? detectCurrency(selectedReceipt.ocrText) : null
@@ -829,13 +839,13 @@ export default function ReceiptsPage() {
                     const rate = DKK_RATES[detected]
                     if (!rate) return null
                     const current = parseFloat(editAmount)
-                    const converted = isNaN(current) ? null : current * rate
+                    const preview = isNaN(current) ? null : amountConverted ? current / rate : current * rate
                     return (
                       <div className="flex items-center justify-between gap-2 rounded-md border border-amber-200 bg-amber-50 p-2 text-xs">
                         <span className="text-amber-900">
                           Bilag i {detected} — kurs {rate.toString().replace('.', ',')}
-                          {converted !== null && (
-                            <> → <strong>{converted.toFixed(2).replace('.', ',')} DKK</strong></>
+                          {preview !== null && (
+                            <> → <strong>{preview.toFixed(2).replace('.', ',')} {amountConverted ? detected : 'DKK'}</strong></>
                           )}
                         </span>
                         <Button
@@ -843,13 +853,14 @@ export default function ReceiptsPage() {
                           size="sm"
                           variant="outline"
                           onClick={() => {
-                            if (!isNaN(current)) {
-                              setEditAmount((current * rate).toFixed(2))
-                            }
+                            if (isNaN(current)) return
+                            const next = amountConverted ? current / rate : current * rate
+                            setEditAmount(next.toFixed(2))
+                            setAmountConverted(!amountConverted)
                           }}
                           disabled={isNaN(current)}
                         >
-                          Konverter
+                          {amountConverted ? 'Fortryd' : 'Konverter'}
                         </Button>
                       </div>
                     )
