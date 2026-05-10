@@ -29,14 +29,20 @@ export function detectCurrency(text: string): DetectedCurrency {
 const AMOUNT_NUM = String.raw`(?:\d{1,3}(?:[.\s]\d{3})+|\d+)(?:[.,]\d{2}|,-)?`
 
 // Amount patterns - ordered by specificity
+// First match wins, so anchor patterns (canonical Danish phrases) come first.
 const AMOUNT_PATTERNS: RegExp[] = [
-  // Explicit total labels (Danish) - decimals optional
-  new RegExp(String.raw`(?:Total|Sum|I\s*alt|Beløb|Subtotal|At\s*betale|Til\s*betaling)[:\s]*(?:DKK|kr\.?|€|\$)?\s*(${AMOUNT_NUM})`, 'i'),
-  // Currency suffix (DKK, kr) - decimals optional
+  // "Beløb til betaling" / "I alt inkl. moms" - canonical Danish "amount due"
+  // Allow up to 200 chars between the anchor and the number to handle multi-line layouts.
+  new RegExp(String.raw`Beløb\s+til\s+betaling[\s\S]{0,200}?(${AMOUNT_NUM})\s*(?:kr\.?|DKK)`, 'i'),
+  new RegExp(String.raw`I\s*alt\s+inkl\.?\s+moms[\s\S]{0,80}?(${AMOUNT_NUM})`, 'i'),
+  new RegExp(String.raw`(?:At\s*betale|Til\s*betaling|Skal\s*betales)[:\s]*(?:DKK|kr\.?)?\s*(${AMOUNT_NUM})`, 'i'),
+  // Generic Danish total labels (less specific) - require number on same line
+  new RegExp(String.raw`(?:Total|Sum|Subtotal)[:\s]*(?:DKK|kr\.?|€|\$)?\s*(${AMOUNT_NUM})`, 'i'),
+  // Currency suffix fallback
   new RegExp(String.raw`(${AMOUNT_NUM})\s*(?:kr\.?|DKK)`, 'i'),
-  // Currency prefix - decimals optional
+  // Currency prefix fallback
   new RegExp(String.raw`(?:DKK|EUR|USD|€|\$)\s*(${AMOUNT_NUM})`, 'i'),
-  // Explicit amount labels (English)
+  // English labels
   new RegExp(String.raw`(?:Total|Amount|Sum|Grand\s*Total|Balance\s*Due|Amount\s*Due)[:\s]*(?:DKK|kr\.?|\$|€)?\s*(${AMOUNT_NUM})`, 'i'),
 ]
 
@@ -77,10 +83,12 @@ const MONTH_NAME_PATTERN = Object.keys(MONTH_NAMES).sort((a, b) => b.length - a.
 
 // Date patterns - try labelled first, then bare formats
 const DATE_PATTERNS: { regex: RegExp; order: 'dmy' | 'ymd' | 'mdy-name' | 'dmy-name' }[] = [
+  // Labelled "Regningsdato: 13. juni 2025" (Danish month name)
+  { regex: new RegExp(String.raw`(?:Regningsdato|Fakturadato|Bilagsdato|Dato)[:\s]*(\d{1,2})\.?\s+(${MONTH_NAME_PATTERN})\.?\s+(\d{2,4})`, 'i'), order: 'dmy-name' },
   // Labelled DD-MM-YYYY (Danish)
-  { regex: /(?:Dato|Date|Fakturadato|Invoice\s*date|Order\s*date)[:\s]*(\d{1,2})[./-](\d{1,2})[./-](\d{2,4})/i, order: 'dmy' },
+  { regex: /(?:Regningsdato|Fakturadato|Bilagsdato|Dato|Date|Invoice\s*date|Order\s*date)[:\s]*(\d{1,2})[./-](\d{1,2})[./-](\d{2,4})/i, order: 'dmy' },
   // Labelled YYYY-MM-DD (ISO)
-  { regex: /(?:Dato|Date|Fakturadato|Invoice\s*date|Order\s*date)[:\s]*(\d{4})[./-](\d{1,2})[./-](\d{1,2})/i, order: 'ymd' },
+  { regex: /(?:Regningsdato|Fakturadato|Bilagsdato|Dato|Date|Invoice\s*date|Order\s*date)[:\s]*(\d{4})[./-](\d{1,2})[./-](\d{1,2})/i, order: 'ymd' },
   // Bare ISO YYYY-MM-DD
   { regex: /(?<!\d)(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})(?!\d)/, order: 'ymd' },
   // Bare DD-MM-YYYY (full year)
@@ -93,11 +101,13 @@ const DATE_PATTERNS: { regex: RegExp; order: 'dmy' | 'ymd' | 'mdy-name' | 'dmy-n
   { regex: new RegExp(String.raw`(${MONTH_NAME_PATTERN})\.?\s+(\d{1,2}),?\s+(\d{2,4})`, 'i'), order: 'mdy-name' },
 ]
 
-// Company/vendor patterns
+// Company/vendor patterns - require word boundaries to avoid matching "Afs:" inside "betalingsfrist"
 const VENDOR_PATTERNS = [
-  /(?:Fra|From|Afsender|Sender)[:\s]*(.+)/i,
-  /(?:Faktura fra|Invoice from|Leveret af|Delivered by)[:\s]*(.+)/i,
-  /(?:CVR|Org\.?\s*(?:nr|no))[.:\s]*\d+\s*[-–]\s*(.+)/i,
+  /\b(?:Faktura\s*fra|Invoice\s*from|Leveret\s*af|Delivered\s*by)\b[:\s]*(.+)/i,
+  /\b(?:Afsender|Sender)\b[:\s]*(.+)/i,
+  /\b(?:CVR|Org\.?\s*(?:nr|no))\b[.:\s]*\d+\s*[-–]\s*(.+)/i,
+  // Detect Danish company suffix in early lines
+  /([A-ZÆØÅ][\wÆØÅæøå&.\- ]{1,60}?\s+(?:A\/S|ApS|IVS|I\/S|P\/S|K\/S))(?=\s|,|$)/,
 ]
 
 export function parseOcrText(text: string): OcrParseResult {
@@ -203,7 +213,28 @@ export function parseOcrText(text: string): OcrParseResult {
   // Extract VAT/moms amount
   result.vatAmount = extractVatAmount(text)
 
+  // Sanity check: if total amount is known and text shows a VAT rate, derive expected
+  // VAT and override the regex match if it's far off (common OCR layout issue where
+  // labels and values appear in separate columns and get misaligned).
+  if (result.amount !== null) {
+    const rateMatch = text.match(/\b(?:moms|vat|mva)[,\s]+(\d{1,2})\s*%/i)
+    if (rateMatch) {
+      const rate = parseInt(rateMatch[1])
+      if (rate > 0 && rate <= 50) {
+        const expected = round2(result.amount * (rate / (100 + rate)))
+        const tolerance = Math.max(0.5, expected * 0.02)
+        if (result.vatAmount === null || Math.abs(result.vatAmount - expected) > tolerance) {
+          result.vatAmount = expected
+        }
+      }
+    }
+  }
+
   return result
+}
+
+function round2(n: number): number {
+  return Math.round(n * 100) / 100
 }
 
 // Convert a captured amount string to a number, handling DK/EU/US conventions
@@ -251,9 +282,14 @@ function parseAmountString(raw: string): number | null {
 // Extract VAT/moms amount from text
 export function extractVatAmount(text: string): number | null {
   const vatPatterns: RegExp[] = [
-    new RegExp(String.raw`(?:Moms|VAT|MVA|Merværdiafgift)[:\s]*(?:DKK|kr\.?)?\s*(${AMOUNT_NUM})`, 'i'),
-    new RegExp(String.raw`(?:25%|25\s*%)[:\s]*(?:DKK|kr\.?)?\s*(${AMOUNT_NUM})`, 'i'),
-    new RegExp(String.raw`(${AMOUNT_NUM})\s*(?:moms|VAT)`, 'i'),
+    // "Moms, 25 % 209,40" / "Moms 25% 209,40" - rate followed by amount
+    new RegExp(String.raw`(?:Moms|VAT|MVA)[,\s]*\d{1,2}\s*%\s*(${AMOUNT_NUM})`, 'i'),
+    // "Moms: 209,40" without rate
+    new RegExp(String.raw`(?:Moms|VAT|MVA|Merværdiafgift)[:\s]+(?:DKK|kr\.?)?\s*(${AMOUNT_NUM})(?!\s*%)`, 'i'),
+    // Rate-prefixed forms: "25%: 209,40"
+    new RegExp(String.raw`\b25\s*%[:\s]*(?:DKK|kr\.?)?\s*(${AMOUNT_NUM})`, 'i'),
+    // Suffix form: "209,40 moms"
+    new RegExp(String.raw`(${AMOUNT_NUM})\s*(?:moms|VAT)\b`, 'i'),
   ]
 
   for (const pattern of vatPatterns) {

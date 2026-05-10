@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getSettings } from '@/lib/settings'
 import { getCompanyContext } from '@/lib/company'
-import { parseOcrText } from '@/lib/ocr-parser'
+import { runOcrPipeline } from '@/lib/ocr-pipeline'
 
 export async function POST(
   request: NextRequest,
@@ -13,7 +13,6 @@ export async function POST(
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  // Get the receipt
   const receipt = await prisma.receipt.findFirst({
     where: { id: params.id, companyId: context.companyId },
   })
@@ -22,7 +21,6 @@ export async function POST(
     return NextResponse.json({ error: 'Receipt not found' }, { status: 404 })
   }
 
-  // Check if API key is configured
   const settings = await getSettings(context.companyId)
   if (!settings.googleCloudKey) {
     await prisma.receipt.update({
@@ -35,96 +33,49 @@ export async function POST(
     return NextResponse.json({ error: 'API key not configured' }, { status: 400 })
   }
 
-  // Update status to processing
   await prisma.receipt.update({
     where: { id: params.id },
     data: { ocrStatus: 'processing', ocrError: null },
   })
 
-  // Run OCR asynchronously
-  processOCR(params.id, receipt.imageUrl, settings.googleCloudKey).catch(console.error)
+  reparseReceipt(params.id, receipt.imageUrl, receipt.fileName ?? '', settings.googleCloudKey).catch((err) => {
+    console.error(`Reparse failed for receipt ${params.id}:`, err)
+  })
 
   return NextResponse.json({ message: 'OCR started' })
 }
 
-async function processOCR(receiptId: string, imageUrl: string, apiKey: string) {
+async function reparseReceipt(
+  receiptId: string,
+  imageUrl: string,
+  fileName: string,
+  apiKey: string
+) {
   try {
-    // Extract base64 from data URL or fetch from URL
-    let base64Image: string
-
-    if (imageUrl.startsWith('data:')) {
-      const matches = imageUrl.match(/^data:([^;]+);base64,(.+)$/)
-      if (!matches) {
-        throw new Error('Invalid image data URL')
-      }
-      base64Image = matches[2]
-    } else if (imageUrl.startsWith('http')) {
-      // Fetch image from URL (Supabase or other storage)
-      const response = await fetch(imageUrl)
-      if (!response.ok) {
-        throw new Error('Failed to fetch image from URL')
-      }
-      const buffer = await response.arrayBuffer()
-      base64Image = Buffer.from(buffer).toString('base64')
-    } else {
-      throw new Error('Image URL format not supported for OCR retry')
-    }
-
-    const response = await fetch(
-      `https://vision.googleapis.com/v1/images:annotate?key=${apiKey}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          requests: [
-            {
-              image: { content: base64Image },
-              features: [{ type: 'TEXT_DETECTION' }],
-            },
-          ],
-        }),
-      }
-    )
-
-    const data = await response.json()
-
-    if (data.error) {
-      throw new Error(data.error.message || 'Google Vision API error')
-    }
-
-    const text = data.responses?.[0]?.fullTextAnnotation?.text || ''
-
-    if (!text.trim()) {
-      await prisma.receipt.update({
-        where: { id: receiptId },
-        data: {
-          ocrStatus: 'completed',
-          ocrText: '',
-          notes: 'Ingen tekst fundet i billedet',
-        },
-      })
-      return
-    }
-
-    // Use consolidated OCR parser
-    const { amount, vatAmount, date, vendor } = parseOcrText(text)
+    const { buffer, mimeType } = await loadBuffer(imageUrl, fileName)
+    const result = await runOcrPipeline({ buffer, mimeType, fileName, apiKey })
 
     await prisma.receipt.update({
       where: { id: receiptId },
       data: {
         ocrStatus: 'completed',
         ocrError: null,
-        ocrText: text.substring(0, 10000),
-        ocrAmount: amount,
-        ocrVatAmount: vatAmount,
-        ocrDate: date,
-        ocrVendor: vendor,
+        ocrText: result.ocrText.substring(0, 10000),
+        ocrAmount: result.amount,
+        ocrVatAmount: result.vatAmount,
+        ocrDate: result.date,
+        ocrVendor: result.vendor,
+        notes: result.source === 'empty' ? 'Ingen tekst fundet i dokumentet' : null,
       },
     })
 
-    console.log(`OCR retry completed for receipt ${receiptId}:`, { amount, vatAmount, date, vendor: vendor?.substring(0, 30) })
+    console.log(`Reparse completed for ${receiptId} via ${result.source}:`, {
+      amount: result.amount,
+      date: result.date,
+      vendor: result.vendor?.substring(0, 30),
+    })
   } catch (error) {
-    console.error('OCR retry error:', error)
+    console.error('Reparse error:', error)
     await prisma.receipt.update({
       where: { id: receiptId },
       data: {
@@ -133,4 +84,27 @@ async function processOCR(receiptId: string, imageUrl: string, apiKey: string) {
       },
     })
   }
+}
+
+async function loadBuffer(imageUrl: string, fileName: string): Promise<{ buffer: Buffer; mimeType: string }> {
+  if (imageUrl.startsWith('data:')) {
+    const matches = imageUrl.match(/^data:([^;]+);base64,(.+)$/)
+    if (!matches) throw new Error('Invalid image data URL')
+    return {
+      buffer: Buffer.from(matches[2], 'base64'),
+      mimeType: matches[1],
+    }
+  }
+
+  if (imageUrl.startsWith('http')) {
+    const response = await fetch(imageUrl)
+    if (!response.ok) throw new Error('Failed to fetch image from URL')
+    const buffer = Buffer.from(await response.arrayBuffer())
+    const mimeType =
+      response.headers.get('content-type') ||
+      (fileName.toLowerCase().endsWith('.pdf') ? 'application/pdf' : 'application/octet-stream')
+    return { buffer, mimeType }
+  }
+
+  throw new Error('Image URL format not supported')
 }
