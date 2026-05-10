@@ -66,31 +66,61 @@ type MatchSuggestion = {
 export default function MatchingPage() {
   const [transactions, setTransactions] = useState<Transaction[]>([])
   const [receipts, setReceipts] = useState<Receipt[]>([])
+  const [totalUnmatched, setTotalUnmatched] = useState(0)
   const [suggestions, setSuggestions] = useState<MatchSuggestion[]>([])
   const [loading, setLoading] = useState(true)
   const [matchDialogOpen, setMatchDialogOpen] = useState(false)
   const [selectedTransaction, setSelectedTransaction] = useState<Transaction | null>(null)
   const [autoMatching, setAutoMatching] = useState(false)
+  const [activeFiscalYear, setActiveFiscalYear] = useState<number | null>(null)
 
   useEffect(() => {
-    fetchData()
+    const init = async () => {
+      try {
+        const res = await fetch('/api/settings')
+        if (res.ok) {
+          const data = await res.json()
+          if (data.activeFiscalYear) {
+            setActiveFiscalYear(data.activeFiscalYear)
+            return
+          }
+        }
+      } catch (error) {
+        console.error('Failed to fetch settings:', error)
+      }
+      // Fallback if no fiscal year configured
+      setActiveFiscalYear(new Date().getFullYear())
+    }
+    init()
   }, [])
 
+  useEffect(() => {
+    if (activeFiscalYear !== null) {
+      fetchData()
+    }
+  }, [activeFiscalYear])
+
   const fetchData = async () => {
+    setLoading(true)
     try {
+      // Query the API directly for unmatched items in the active fiscal year so
+      // the count matches what /reports shows. Bumping limit to MAX_PAGE_SIZE
+      // (200) covers the vast majority of practical reconciliation backlogs;
+      // the API still returns total so the user knows if more pages exist.
+      const txUrl = `/api/transactions?matched=false&year=${activeFiscalYear}&limit=200`
       const [txRes, receiptRes] = await Promise.all([
-        fetch('/api/transactions'),
-        fetch('/api/receipts'),
+        fetch(txUrl),
+        fetch('/api/receipts?matched=false&limit=200'),
       ])
       const txResponse = await txRes.json()
       const receiptResponse = await receiptRes.json()
 
-      // Handle paginated responses
       const txData = txResponse.data || txResponse
       const receiptData = receiptResponse.data || receiptResponse
 
-      setTransactions(txData.filter((tx: Transaction) => !tx.matched))
-      setReceipts(receiptData.filter((r: Receipt) => r.transactions.length === 0))
+      setTransactions(txData)
+      setReceipts(receiptData)
+      setTotalUnmatched(txResponse.pagination?.total ?? txData.length)
     } catch (error) {
       console.error('Failed to fetch data:', error)
     } finally {
@@ -235,7 +265,9 @@ export default function MatchingPage() {
         <CardHeader>
           <CardTitle>Uafstemte transaktioner</CardTitle>
           <CardDescription>
-            {transactions.length} transaktioner mangler bilag
+            {totalUnmatched} transaktioner mangler bilag
+            {activeFiscalYear !== null && ` i ${activeFiscalYear}`}
+            {transactions.length < totalUnmatched && ` (viser de første ${transactions.length})`}
           </CardDescription>
         </CardHeader>
         <CardContent>
