@@ -36,8 +36,10 @@ const AMOUNT_PATTERNS: RegExp[] = [
   new RegExp(String.raw`Beløb\s+til\s+betaling[\s\S]{0,200}?(${AMOUNT_NUM})\s*(?:kr\.?|DKK)`, 'i'),
   new RegExp(String.raw`I\s*alt\s+inkl\.?\s+moms[\s\S]{0,80}?(${AMOUNT_NUM})`, 'i'),
   new RegExp(String.raw`(?:At\s*betale|Til\s*betaling|Skal\s*betales)[:\s]*(?:DKK|kr\.?)?\s*(${AMOUNT_NUM})`, 'i'),
-  // Generic Danish total labels (less specific) - require number on same line
-  new RegExp(String.raw`(?:Total|Sum|Subtotal)[:\s]*(?:DKK|kr\.?|€|\$)?\s*(${AMOUNT_NUM})`, 'i'),
+  // Total/Sum (excluding Subtotal which is an intermediate value).
+  // No trailing \b after Total because "Total299" has no word-boundary between letter and digit.
+  new RegExp(String.raw`(?<!Sub)\bTotal[:\s]*(?:DKK|kr\.?|€|\$)?\s*(${AMOUNT_NUM})`, 'i'),
+  new RegExp(String.raw`\bSum[:\s]*(?:DKK|kr\.?|€|\$)?\s*(${AMOUNT_NUM})`, 'i'),
   // Currency suffix fallback
   new RegExp(String.raw`(${AMOUNT_NUM})\s*(?:kr\.?|DKK)`, 'i'),
   // Currency prefix fallback
@@ -288,8 +290,8 @@ export function extractVatAmount(text: string): number | null {
     new RegExp(String.raw`(?:Moms|VAT|MVA|Merværdiafgift)[:\s]+(?:DKK|kr\.?)?\s*(${AMOUNT_NUM})(?!\s*%)`, 'i'),
     // Rate-prefixed forms: "25%: 209,40"
     new RegExp(String.raw`\b25\s*%[:\s]*(?:DKK|kr\.?)?\s*(${AMOUNT_NUM})`, 'i'),
-    // Suffix form: "209,40 moms"
-    new RegExp(String.raw`(${AMOUNT_NUM})\s*(?:moms|VAT)\b`, 'i'),
+    // Suffix form: "209,40 moms" or "60 kr. Moms"
+    new RegExp(String.raw`(${AMOUNT_NUM})\s*(?:kr\.?|DKK)?\s*\b(?:moms|VAT)\b`, 'i'),
   ]
 
   for (const pattern of vatPatterns) {
