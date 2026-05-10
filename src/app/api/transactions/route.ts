@@ -37,7 +37,10 @@ export async function GET(request: NextRequest) {
   if (matched === 'true') {
     where.matched = true
   } else if (matched === 'false') {
+    // "Unmatched" excludes both real matches and transactions the user has
+    // explicitly marked as "bilag mangler" (no receipt expected).
     where.matched = false
+    where.receiptMissing = false
   }
 
   if (categoryId) {

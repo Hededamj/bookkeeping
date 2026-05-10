@@ -75,6 +75,9 @@ export default function MatchingPage() {
   // 'all' shows the full unmatched backlog regardless of date.
   const [selectedYear, setSelectedYear] = useState<'all' | number>('all')
   const [yearInitialized, setYearInitialized] = useState(false)
+  // "Bilag mangler" dialog state
+  const [missingDialog, setMissingDialog] = useState<{ tx: Transaction; note: string } | null>(null)
+  const [savingMissing, setSavingMissing] = useState(false)
 
   useEffect(() => {
     const init = async () => {
@@ -158,6 +161,27 @@ export default function MatchingPage() {
       setSelectedTransaction(null)
     } catch (error) {
       console.error('Failed to match:', error)
+    }
+  }
+
+  const confirmMissingReceipt = async () => {
+    if (!missingDialog) return
+    setSavingMissing(true)
+    try {
+      await fetch(`/api/transactions/${missingDialog.tx.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          receiptMissing: true,
+          receiptMissingNote: missingDialog.note.trim() || null,
+        }),
+      })
+      setMissingDialog(null)
+      fetchData()
+    } catch (error) {
+      console.error('Failed to mark as missing:', error)
+    } finally {
+      setSavingMissing(false)
     }
   }
 
@@ -307,7 +331,7 @@ export default function MatchingPage() {
                   <TableHead>Dato</TableHead>
                   <TableHead>Beskrivelse</TableHead>
                   <TableHead className="text-right">Beløb</TableHead>
-                  <TableHead className="w-[150px]">Handling</TableHead>
+                  <TableHead className="w-[280px]">Handling</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -327,17 +351,27 @@ export default function MatchingPage() {
                       {formatCurrency(parseFloat(tx.amount))}
                     </TableCell>
                     <TableCell>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => {
-                          setSelectedTransaction(tx)
-                          setMatchDialogOpen(true)
-                        }}
-                      >
-                        <Link2 className="mr-2 h-4 w-4" />
-                        Match bilag
-                      </Button>
+                      <div className="flex items-center gap-1">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => {
+                            setSelectedTransaction(tx)
+                            setMatchDialogOpen(true)
+                          }}
+                        >
+                          <Link2 className="mr-2 h-4 w-4" />
+                          Match bilag
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          title="Markér som bilag mangler"
+                          onClick={() => setMissingDialog({ tx, note: '' })}
+                        >
+                          Bilag mangler
+                        </Button>
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -431,6 +465,41 @@ export default function MatchingPage() {
               </Table>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* "Bilag mangler" dialog */}
+      <Dialog open={!!missingDialog} onOpenChange={(o) => !o && setMissingDialog(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Markér som bilag mangler</DialogTitle>
+            <DialogDescription>
+              {missingDialog && (
+                <>
+                  {missingDialog.tx.description} ({formatCurrency(parseFloat(missingDialog.tx.amount))})
+                </>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <p className="text-sm text-muted-foreground">
+              Transaktionen forsvinder fra Afstemning og tæller som afstemt i rapporter.
+            </p>
+            <textarea
+              className="min-h-[80px] w-full rounded-md border border-input bg-background p-2 text-sm"
+              placeholder="Notat (valgfrit) — fx 'kontant køb, ingen kvittering'"
+              value={missingDialog?.note ?? ''}
+              onChange={(e) => missingDialog && setMissingDialog({ ...missingDialog, note: e.target.value })}
+            />
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setMissingDialog(null)} disabled={savingMissing}>
+                Annuller
+              </Button>
+              <Button onClick={confirmMissingReceipt} disabled={savingMissing}>
+                {savingMissing ? 'Gemmer...' : 'Bekræft'}
+              </Button>
+            </div>
+          </div>
         </DialogContent>
       </Dialog>
     </div>

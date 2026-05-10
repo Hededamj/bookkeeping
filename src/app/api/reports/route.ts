@@ -59,8 +59,9 @@ export async function GET(request: NextRequest) {
       expenses += Math.abs(amount)
     }
 
-    // Count unmatched transactions (no receipt attached)
-    if (!tx.matched && !tx.receiptId) {
+    // Count unmatched transactions (no receipt attached and not flagged as
+    // "bilag mangler" by the user).
+    if (!tx.matched && !tx.receiptId && !tx.receiptMissing) {
       unmatchedCount++
     }
 

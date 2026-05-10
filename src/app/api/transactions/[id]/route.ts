@@ -13,7 +13,7 @@ export async function PATCH(
   }
 
   const body = await request.json()
-  const { categoryId, receiptId, matched, notes, vendorId, vendorName } = body
+  const { categoryId, receiptId, matched, notes, vendorId, vendorName, receiptMissing, receiptMissingNote } = body
 
   // Get current transaction for learning (must belong to this company)
   const currentTransaction = await prisma.transaction.findFirst({
@@ -73,6 +73,8 @@ export async function PATCH(
       ...(matched !== undefined && { matched }),
       ...(notes !== undefined && { notes }),
       ...(finalVendorId !== undefined && { vendorId: finalVendorId }),
+      ...(receiptMissing !== undefined && { receiptMissing }),
+      ...(receiptMissingNote !== undefined && { receiptMissingNote }),
     },
     include: {
       category: true,
