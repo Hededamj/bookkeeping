@@ -72,7 +72,9 @@ export default function MatchingPage() {
   const [matchDialogOpen, setMatchDialogOpen] = useState(false)
   const [selectedTransaction, setSelectedTransaction] = useState<Transaction | null>(null)
   const [autoMatching, setAutoMatching] = useState(false)
-  const [activeFiscalYear, setActiveFiscalYear] = useState<number | null>(null)
+  // 'all' shows the full unmatched backlog regardless of date.
+  const [selectedYear, setSelectedYear] = useState<'all' | number>('all')
+  const [yearInitialized, setYearInitialized] = useState(false)
 
   useEffect(() => {
     const init = async () => {
@@ -81,33 +83,32 @@ export default function MatchingPage() {
         if (res.ok) {
           const data = await res.json()
           if (data.activeFiscalYear) {
-            setActiveFiscalYear(data.activeFiscalYear)
-            return
+            setSelectedYear(data.activeFiscalYear)
           }
         }
       } catch (error) {
         console.error('Failed to fetch settings:', error)
+      } finally {
+        setYearInitialized(true)
       }
-      // Fallback if no fiscal year configured
-      setActiveFiscalYear(new Date().getFullYear())
     }
     init()
   }, [])
 
   useEffect(() => {
-    if (activeFiscalYear !== null) {
+    if (yearInitialized) {
       fetchData()
     }
-  }, [activeFiscalYear])
+  }, [yearInitialized, selectedYear])
 
   const fetchData = async () => {
     setLoading(true)
     try {
-      // Query the API directly for unmatched items in the active fiscal year so
-      // the count matches what /reports shows. Bumping limit to MAX_PAGE_SIZE
-      // (200) covers the vast majority of practical reconciliation backlogs;
-      // the API still returns total so the user knows if more pages exist.
-      const txUrl = `/api/transactions?matched=false&year=${activeFiscalYear}&limit=200`
+      // Query the API directly for unmatched items so the count matches what
+      // /reports shows. limit=200 (MAX_PAGE_SIZE) covers practical backlogs;
+      // pagination.total in the response tells us if more rows exist.
+      const yearParam = selectedYear === 'all' ? '' : `&year=${selectedYear}`
+      const txUrl = `/api/transactions?matched=false${yearParam}&limit=200`
       const [txRes, receiptRes] = await Promise.all([
         fetch(txUrl),
         fetch('/api/receipts?matched=false&limit=200'),
@@ -127,6 +128,10 @@ export default function MatchingPage() {
       setLoading(false)
     }
   }
+
+  // Year options: current year ± 2, plus an "all years" option.
+  const currentYear = new Date().getFullYear()
+  const yearOptions: Array<'all' | number> = ['all', currentYear - 2, currentYear - 1, currentYear, currentYear + 1]
 
   const runAutoMatch = async () => {
     setAutoMatching(true)
@@ -168,10 +173,23 @@ export default function MatchingPage() {
           <h1 className="text-3xl font-bold">Afstemning</h1>
           <p className="text-muted-foreground">Match transaktioner med bilag</p>
         </div>
-        <Button onClick={runAutoMatch} disabled={autoMatching}>
-          <Wand2 className="mr-2 h-4 w-4" />
-          {autoMatching ? 'Kører...' : 'Auto-match'}
-        </Button>
+        <div className="flex items-center gap-2">
+          <select
+            className="h-9 rounded-md border border-input bg-background px-3 text-sm"
+            value={selectedYear}
+            onChange={(e) => setSelectedYear(e.target.value === 'all' ? 'all' : parseInt(e.target.value, 10))}
+          >
+            {yearOptions.map((y) => (
+              <option key={String(y)} value={String(y)}>
+                {y === 'all' ? 'Alle år' : y}
+              </option>
+            ))}
+          </select>
+          <Button onClick={runAutoMatch} disabled={autoMatching}>
+            <Wand2 className="mr-2 h-4 w-4" />
+            {autoMatching ? 'Kører...' : 'Auto-match'}
+          </Button>
+        </div>
       </div>
 
       {/* Suggestions */}
@@ -266,7 +284,7 @@ export default function MatchingPage() {
           <CardTitle>Uafstemte transaktioner</CardTitle>
           <CardDescription>
             {totalUnmatched} transaktioner mangler bilag
-            {activeFiscalYear !== null && ` i ${activeFiscalYear}`}
+            {selectedYear === 'all' ? ' (alle år)' : ` i ${selectedYear}`}
             {transactions.length < totalUnmatched && ` (viser de første ${transactions.length})`}
           </CardDescription>
         </CardHeader>
