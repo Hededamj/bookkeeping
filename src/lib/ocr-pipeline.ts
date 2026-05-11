@@ -81,6 +81,29 @@ async function extractPdfText(buffer: Buffer): Promise<string> {
   return data.text || ''
 }
 
+// HEIC/HEIF files start with [size:4][ftyp][brand:4]. Detect by inspecting the
+// ftyp brand at byte offset 8 (since iOS Safari sometimes uploads with a wrong
+// mime type or as application/octet-stream).
+function isHeic(buffer: Buffer, mimeType: string, fileName: string): boolean {
+  if (/heic|heif/i.test(mimeType)) return true
+  if (/\.(heic|heif)$/i.test(fileName)) return true
+  if (buffer.length < 12) return false
+  if (buffer.slice(4, 8).toString('ascii') !== 'ftyp') return false
+  const brand = buffer.slice(8, 12).toString('ascii')
+  return /^(heic|heix|hevc|heim|heis|hevm|hevs|mif1|msf1)$/.test(brand)
+}
+
+async function convertHeicToJpeg(buffer: Buffer): Promise<Buffer> {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const heicConvert = require('heic-convert')
+  const result = await heicConvert({
+    buffer,
+    format: 'JPEG',
+    quality: 0.85,
+  })
+  return Buffer.from(result)
+}
+
 export interface OcrInput {
   buffer: Buffer
   mimeType: string
@@ -89,7 +112,16 @@ export interface OcrInput {
 }
 
 export async function runOcrPipeline(input: OcrInput): Promise<OcrPipelineResult> {
-  const { buffer, mimeType, fileName, apiKey } = input
+  let { buffer, mimeType } = input
+  const { fileName, apiKey } = input
+
+  // iPhone photos arrive as HEIC sometimes (Safari auto-converts to JPEG for
+  // most uploads, but not all paths). Vision API can't read HEIC, so convert.
+  if (isHeic(buffer, mimeType, fileName)) {
+    buffer = await convertHeicToJpeg(buffer)
+    mimeType = 'image/jpeg'
+  }
+
   const isPdf = mimeType === 'application/pdf' || fileName.toLowerCase().endsWith('.pdf')
   const base64 = buffer.toString('base64')
 

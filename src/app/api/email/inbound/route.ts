@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { parseOcrText } from '@/lib/ocr-parser'
+import { runOcrPipeline } from '@/lib/ocr-pipeline'
 import { uploadReceiptImage, isSupabaseConfigured } from '@/lib/supabase'
 import crypto from 'crypto'
 
@@ -162,7 +162,8 @@ export async function POST(request: NextRequest) {
 
       // Trigger OCR processing asynchronously if API key is configured
       if (apiKey) {
-        processOCR(receipt.id, attachment.content, apiKey).catch(console.error)
+        const buffer = Buffer.from(attachment.content, 'base64')
+        runEmailOcr(receipt.id, buffer, attachment.contentType, attachment.filename, apiKey).catch(console.error)
       }
     }
 
@@ -205,64 +206,35 @@ function isImageOrPdf(contentType: string): boolean {
   )
 }
 
-async function processOCR(receiptId: string, base64Image: string, apiKey: string) {
+async function runEmailOcr(
+  receiptId: string,
+  buffer: Buffer,
+  mimeType: string,
+  fileName: string,
+  apiKey: string
+) {
   try {
     await prisma.receipt.update({
       where: { id: receiptId },
       data: { ocrStatus: 'processing' },
     })
 
-    const response = await fetch(
-      `https://vision.googleapis.com/v1/images:annotate?key=${apiKey}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          requests: [
-            {
-              image: { content: base64Image },
-              features: [{ type: 'TEXT_DETECTION' }],
-            },
-          ],
-        }),
-      }
-    )
-
-    const data = await response.json()
-
-    if (data.error) {
-      throw new Error(data.error.message || 'Google Vision API error')
-    }
-
-    const text = data.responses?.[0]?.fullTextAnnotation?.text || ''
-
-    if (!text.trim()) {
-      await prisma.receipt.update({
-        where: { id: receiptId },
-        data: {
-          ocrStatus: 'completed',
-          ocrText: '',
-        },
-      })
-      return
-    }
-
-    // Use consolidated OCR parser
-    const { amount, vatAmount, date, vendor } = parseOcrText(text)
+    const result = await runOcrPipeline({ buffer, mimeType, fileName, apiKey })
 
     await prisma.receipt.update({
       where: { id: receiptId },
       data: {
         ocrStatus: 'completed',
-        ocrText: text.substring(0, 10000),
-        ocrAmount: amount,
-        ocrVatAmount: vatAmount,
-        ocrDate: date,
-        ocrVendor: vendor,
+        ocrError: null,
+        ocrText: result.ocrText.substring(0, 10000),
+        ocrAmount: result.amount,
+        ocrVatAmount: result.vatAmount,
+        ocrDate: result.date,
+        ocrVendor: result.vendor,
       },
     })
 
-    console.log(`Email OCR completed for receipt ${receiptId}`)
+    console.log(`Email OCR completed for receipt ${receiptId} via ${result.source}`)
   } catch (error) {
     console.error('OCR processing error:', error)
     await prisma.receipt.update({

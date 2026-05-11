@@ -58,6 +58,9 @@ export async function GET() {
     // Fiscal year
     activeFiscalYear: settings.activeFiscalYear,
 
+    // Mileage
+    mileageRate: settings.mileageRate ? Number(settings.mileageRate) : null,
+
     // Logs
     emailLogs,
   })
@@ -78,6 +81,7 @@ export async function POST(request: NextRequest) {
     emailProvider,
     emailWebhookSecret,
     activeFiscalYear,
+    mileageRate,
   } = body
 
   // Get or create settings for this company
@@ -108,6 +112,9 @@ export async function POST(request: NextRequest) {
   }
   if (activeFiscalYear !== undefined) {
     updateData.activeFiscalYear = activeFiscalYear ? parseInt(activeFiscalYear, 10) : null
+  }
+  if (mileageRate !== undefined) {
+    updateData.mileageRate = mileageRate ? parseFloat(mileageRate) : null
   }
 
   if (!settings) {

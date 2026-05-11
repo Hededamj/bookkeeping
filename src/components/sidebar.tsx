@@ -11,6 +11,7 @@ import {
   Settings,
   LogOut,
   CreditCard,
+  Car,
   Menu,
   X,
 } from 'lucide-react'
@@ -25,6 +26,7 @@ const navigation = [
   { name: 'Transaktioner', href: '/transactions', icon: CreditCard },
   { name: 'Bilag', href: '/receipts', icon: Receipt },
   { name: 'Afstemning', href: '/matching', icon: Link2 },
+  { name: 'Kørsel', href: '/koersel', icon: Car },
   { name: 'Rapporter', href: '/reports', icon: BarChart3 },
   { name: 'Indstillinger', href: '/settings', icon: Settings },
 ]
