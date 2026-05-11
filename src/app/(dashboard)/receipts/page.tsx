@@ -434,43 +434,6 @@ export default function ReceiptsPage() {
     }
   }, [])
 
-  const capturePhoto = async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'environment' },
-      })
-
-      // Create video element
-      const video = document.createElement('video')
-      video.srcObject = stream
-      await video.play()
-
-      // Create canvas and capture image
-      const canvas = document.createElement('canvas')
-      canvas.width = video.videoWidth
-      canvas.height = video.videoHeight
-      canvas.getContext('2d')?.drawImage(video, 0, 0)
-
-      // Stop stream
-      stream.getTracks().forEach((track) => track.stop())
-
-      // Convert to blob
-      canvas.toBlob(async (blob) => {
-        if (blob) {
-          const file = new File([blob], `receipt-${Date.now()}.jpg`, {
-            type: 'image/jpeg',
-          })
-          const dataTransfer = new DataTransfer()
-          dataTransfer.items.add(file)
-          handleUpload(dataTransfer.files)
-        }
-      }, 'image/jpeg', 0.8)
-    } catch (error) {
-      console.error('Camera access denied:', error)
-      alert('Kunne ikke få adgang til kameraet')
-    }
-  }
-
   // Server-side filtering now, just use receipts directly
   const filteredReceipts = receipts
 
@@ -520,9 +483,21 @@ export default function ReceiptsPage() {
                       />
                     </label>
                   </Button>
-                  <Button variant="outline" onClick={capturePhoto}>
-                    <Camera className="mr-2 h-4 w-4" />
-                    Tag foto
+                  <Button asChild variant="outline">
+                    <label>
+                      <Camera className="mr-2 h-4 w-4" />
+                      Tag foto
+                      {/* capture=environment opens the native iOS/Android camera app
+                          directly. Far more reliable than getUserMedia which silently
+                          fails on iOS Safari after granting permission. */}
+                      <input
+                        type="file"
+                        className="hidden"
+                        accept="image/*"
+                        capture="environment"
+                        onChange={(e) => handleUpload(e.target.files)}
+                      />
+                    </label>
                   </Button>
                 </div>
               </>
