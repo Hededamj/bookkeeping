@@ -21,7 +21,7 @@ import {
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { formatCurrency, formatDate } from '@/lib/utils'
-import { Plus, Trash2, Car, Loader2 } from 'lucide-react'
+import { Plus, Trash2, Car, Loader2, MapPin } from 'lucide-react'
 
 type MileageLog = {
   id: string
@@ -49,6 +49,8 @@ export default function KoerselPage() {
 
   const [addDialog, setAddDialog] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [calculating, setCalculating] = useState(false)
+  const [distanceError, setDistanceError] = useState<string | null>(null)
   const [form, setForm] = useState({
     date: new Date().toISOString().slice(0, 10),
     fromLocation: '',
@@ -109,7 +111,32 @@ export default function KoerselPage() {
       vehicle: '',
       rate: defaultRate.toFixed(2),
     })
+    setDistanceError(null)
     setAddDialog(true)
+  }
+
+  const calculateDistance = async () => {
+    if (!form.fromLocation.trim() || !form.toLocation.trim()) {
+      setDistanceError('Udfyld fra og til først')
+      return
+    }
+    setCalculating(true)
+    setDistanceError(null)
+    try {
+      const url = `/api/mileage/distance?from=${encodeURIComponent(form.fromLocation)}&to=${encodeURIComponent(form.toLocation)}`
+      const res = await fetch(url)
+      const data = await res.json()
+      if (!res.ok) {
+        setDistanceError(data.error || 'Kunne ikke beregne afstand')
+        return
+      }
+      setForm((f) => ({ ...f, distance: String(data.km) }))
+    } catch (error) {
+      console.error('Distance calc failed:', error)
+      setDistanceError('Kunne ikke beregne afstand')
+    } finally {
+      setCalculating(false)
+    }
   }
 
   const submitTrip = async () => {
@@ -287,7 +314,19 @@ export default function KoerselPage() {
             </div>
             <div className="grid grid-cols-3 gap-3">
               <div>
-                <Label>Km</Label>
+                <div className="flex items-center justify-between">
+                  <Label>Km</Label>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    className="h-6 px-2 text-xs"
+                    onClick={calculateDistance}
+                    disabled={calculating || !form.fromLocation.trim() || !form.toLocation.trim()}
+                  >
+                    {calculating ? <Loader2 className="h-3 w-3 animate-spin" /> : <><MapPin className="mr-1 h-3 w-3" />Beregn</>}
+                  </Button>
+                </div>
                 <Input type="number" step="0.1" placeholder="0" value={form.distance} onChange={(e) => setForm({ ...form, distance: e.target.value })} />
               </div>
               <div>
@@ -299,6 +338,9 @@ export default function KoerselPage() {
                 <Input placeholder="Egen bil" value={form.vehicle} onChange={(e) => setForm({ ...form, vehicle: e.target.value })} />
               </div>
             </div>
+            {distanceError && (
+              <p className="text-sm text-red-600">{distanceError}</p>
+            )}
             {form.distance && form.rate && (
               <p className="text-sm text-muted-foreground">
                 Fradrag: <strong>{formatCurrency(parseFloat(form.distance) * parseFloat(form.rate))}</strong>

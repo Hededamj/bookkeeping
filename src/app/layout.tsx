@@ -8,6 +8,15 @@ export const metadata: Metadata = {
   title: 'Bogføring',
   description: 'Simpel bogførings-app til enkeltmandsvirksomhed',
   manifest: '/manifest.json',
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: 'default',
+    title: 'Bogføring',
+  },
+  icons: {
+    icon: '/icon.svg',
+    apple: '/icon.svg',
+  },
 }
 
 export const viewport: Viewport = {

@@ -81,6 +81,7 @@ type AppSettings = {
   emailWebhookSecret: string
   hasEmailWebhookSecret: boolean
   activeFiscalYear: number | null
+  mileageRate: number | null
   emailLogs: Array<{
     id: string
     sender: string
@@ -117,6 +118,7 @@ export default function SettingsPage() {
     emailWebhookSecret: '',
     hasEmailWebhookSecret: false,
     activeFiscalYear: null,
+    mileageRate: null,
     emailLogs: [],
   })
   const [saving, setSaving] = useState(false)
@@ -625,6 +627,51 @@ export default function SettingsPage() {
             <span className="text-sm text-muted-foreground">
               Skift til næste år når regnskabet for {settings.activeFiscalYear || new Date().getFullYear()} er afleveret
             </span>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Mileage rate */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Kørselssats</CardTitle>
+          <CardDescription>
+            Standardsats for fradragsberettiget erhvervskørsel (SKAT). Opdatér hvert år når SKAT annoncerer ny sats. Default 3,79 kr/km.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="flex items-center gap-3">
+            <Input
+              type="number"
+              step="0.01"
+              className="w-32"
+              placeholder="3.79"
+              value={settings.mileageRate ?? ''}
+              onChange={(e) => setSettings({ ...settings, mileageRate: e.target.value ? parseFloat(e.target.value) : null })}
+            />
+            <span className="text-sm text-muted-foreground">kr/km</span>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={async () => {
+                setSaving(true)
+                setSaveStatus(null)
+                try {
+                  const res = await fetch('/api/settings', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ mileageRate: settings.mileageRate }),
+                  })
+                  if (res.ok) setSaveStatus('Sats gemt')
+                } finally {
+                  setSaving(false)
+                }
+              }}
+              disabled={saving}
+            >
+              Gem sats
+            </Button>
+            {saveStatus && <span className="text-sm text-green-600">{saveStatus}</span>}
           </div>
         </CardContent>
       </Card>
