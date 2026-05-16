@@ -214,6 +214,27 @@ export function parseOcrText(text: string): OcrParseResult {
     }
   }
 
+  // Column-layout correction: when labels (Subtotal/Moms/Total) and values appear
+  // in separate columns, OCR reads labels then values sequentially, so the regex
+  // anchored on "Total" can pick up the subtotal value instead. If a VAT rate is
+  // present AND amount × (1 + rate/100) appears elsewhere in the text, our amount
+  // was the subtotal — prefer the inkl-moms total.
+  if (result.amount !== null) {
+    const rate = detectVatRate(text)
+    if (rate !== null) {
+      const expectedTotal = round2(result.amount * (1 + rate / 100))
+      const numRegex = new RegExp(AMOUNT_NUM, 'g')
+      let m: RegExpExecArray | null
+      while ((m = numRegex.exec(text)) !== null) {
+        const n = parseAmountString(m[0])
+        if (n !== null && Math.abs(n - expectedTotal) < 0.5) {
+          result.amount = n
+          break
+        }
+      }
+    }
+  }
+
   // Extract VAT/moms amount
   result.vatAmount = extractVatAmount(text)
 
@@ -221,20 +242,34 @@ export function parseOcrText(text: string): OcrParseResult {
   // VAT and override the regex match if it's far off (common OCR layout issue where
   // labels and values appear in separate columns and get misaligned).
   if (result.amount !== null) {
-    const rateMatch = text.match(/\b(?:moms|vat|mva)[,\s]+(\d{1,2})\s*%/i)
-    if (rateMatch) {
-      const rate = parseInt(rateMatch[1])
-      if (rate > 0 && rate <= 50) {
-        const expected = round2(result.amount * (rate / (100 + rate)))
-        const tolerance = Math.max(0.5, expected * 0.02)
-        if (result.vatAmount === null || Math.abs(result.vatAmount - expected) > tolerance) {
-          result.vatAmount = expected
-        }
+    const rate = detectVatRate(text)
+    if (rate !== null) {
+      const expected = round2(result.amount * (rate / (100 + rate)))
+      const tolerance = Math.max(0.5, expected * 0.02)
+      if (result.vatAmount === null || Math.abs(result.vatAmount - expected) > tolerance) {
+        result.vatAmount = expected
       }
     }
   }
 
   return result
+}
+
+// Detect VAT rate in text. Handles both Danish orderings: "moms 25%" or "25% moms",
+// with optional decimals ("25,00%" / "25.00%").
+function detectVatRate(text: string): number | null {
+  const patterns: RegExp[] = [
+    /\b(?:moms|vat|mva|merværdiafgift)[,\s:]+(\d{1,2})(?:[.,]\d{1,2})?\s*%/i,
+    /(\d{1,2})(?:[.,]\d{1,2})?\s*%\s*(?:moms|vat|mva|merværdiafgift)/i,
+  ]
+  for (const p of patterns) {
+    const match = text.match(p)
+    if (match) {
+      const rate = parseInt(match[1])
+      if (rate > 0 && rate <= 50) return rate
+    }
+  }
+  return null
 }
 
 function round2(n: number): number {
