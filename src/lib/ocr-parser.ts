@@ -36,6 +36,9 @@ const AMOUNT_PATTERNS: RegExp[] = [
   // Allow up to 200 chars between the anchor and the number to handle multi-line layouts.
   new RegExp(String.raw`Beløb\s+til\s+betaling[\s\S]{0,200}?(${AMOUNT_NUM})\s*(?:kr\.?|DKK)`, 'i'),
   new RegExp(String.raw`I\s*alt\s+inkl\.?\s+moms[\s\S]{0,80}?(${AMOUNT_NUM})`, 'i'),
+  // "Total DKK inkl. moms:411,25" - Billy Danish self-bill format. Anchor on
+  // "inkl. moms" so "Total DKK ekskl. moms" (subtotal) is not captured.
+  new RegExp(String.raw`\bTotal\s*(?:DKK|kr\.?)?\s*inkl\.?\s*moms[:\s]*(${AMOUNT_NUM})`, 'i'),
   // "Total including VAT" / "Total incl. VAT" - English equivalent (e.g. Dinero/Billy English templates)
   // No mandatory separator between VAT and the number — labels can be glued to values without whitespace.
   new RegExp(String.raw`Total\s+incl(?:uding|\.)?\s+VAT[:\s]*(?:DKK|kr\.?|\$|€)?\s*(${AMOUNT_NUM})`, 'i'),
@@ -338,8 +341,9 @@ export function extractVatAmount(text: string): number | null {
     new RegExp(String.raw`(?:Moms|VAT|MVA)[,\s]*\d{1,2}\s*%\s*(${AMOUNT_NUM})`, 'i'),
     // "VAT (25%)62.50" / "VAT (25 %) 62,50" - Billy English template with parenthesized rate
     new RegExp(String.raw`(?:Moms|VAT|MVA)\s*\(\s*\d{1,2}(?:[.,]\d{1,2})?\s*%\s*\)\s*(?:DKK|kr\.?)?\s*(${AMOUNT_NUM})`, 'i'),
-    // "Moms: 209,40" without rate
-    new RegExp(String.raw`(?:Moms|VAT|MVA|Merværdiafgift)[:\s]+(?:DKK|kr\.?)?\s*(${AMOUNT_NUM})(?!\s*%)`, 'i'),
+    // "Moms: 209,40" without rate. Line-anchored so "ekskl. moms" / "inkl. moms"
+    // (which are subtotal/total labels, not the VAT amount) don't trigger this.
+    new RegExp(String.raw`^\s*(?:Moms|VAT|MVA|Merværdiafgift)[:\s]+(?:DKK|kr\.?)?\s*(${AMOUNT_NUM})(?!\s*%)`, 'im'),
     // Rate-prefixed forms: "25%: 209,40"
     new RegExp(String.raw`\b25\s*%[:\s]*(?:DKK|kr\.?)?\s*(${AMOUNT_NUM})`, 'i'),
     // Suffix form: "209,40 moms" or "60 kr. Moms" - restrict to same line
