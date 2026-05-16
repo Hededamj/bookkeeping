@@ -24,9 +24,10 @@ export function detectCurrency(text: string): DetectedCurrency {
 }
 
 // Amount number subpattern: optional thousand separators, optional decimals, optional ",-" suffix
-// Captures: 1234 | 1.234 | 1,234.56 | 1.234,56 | 1234,56 | 500,-
+// Captures: 1234 | 1.234 | 1,234.56 | 1.234,56 | 1234,56 | 500,- | 1,250.00
+// Comma is also accepted as a thousand separator (US/Billy English templates).
 // Try grouped form first (requires at least one separator), fall back to plain digits.
-const AMOUNT_NUM = String.raw`(?:\d{1,3}(?:[.\s]\d{3})+|\d+)(?:[.,]\d{2}|,-)?`
+const AMOUNT_NUM = String.raw`(?:\d{1,3}(?:[.,\s]\d{3})+|\d+)(?:[.,]\d{2}|,-)?`
 
 // Amount patterns - ordered by specificity
 // First match wins, so anchor patterns (canonical Danish phrases) come first.
@@ -35,6 +36,9 @@ const AMOUNT_PATTERNS: RegExp[] = [
   // Allow up to 200 chars between the anchor and the number to handle multi-line layouts.
   new RegExp(String.raw`Beløb\s+til\s+betaling[\s\S]{0,200}?(${AMOUNT_NUM})\s*(?:kr\.?|DKK)`, 'i'),
   new RegExp(String.raw`I\s*alt\s+inkl\.?\s+moms[\s\S]{0,80}?(${AMOUNT_NUM})`, 'i'),
+  // "Total including VAT" / "Total incl. VAT" - English equivalent (e.g. Dinero/Billy English templates)
+  // No mandatory separator between VAT and the number — labels can be glued to values without whitespace.
+  new RegExp(String.raw`Total\s+incl(?:uding|\.)?\s+VAT[:\s]*(?:DKK|kr\.?|\$|€)?\s*(${AMOUNT_NUM})`, 'i'),
   // [:\s]* on both sides of the optional currency handles "DKK: 123", "kr 123",
   // "DKK:123" (CK regnskab format) and "DKK 123" uniformly.
   new RegExp(String.raw`(?:At\s*betale|Til\s*betaling|Skal\s*betales)[:\s]*(?:DKK|kr\.?)?[:\s]*(${AMOUNT_NUM})`, 'i'),
@@ -126,15 +130,23 @@ export function parseOcrText(text: string): OcrParseResult {
     return result
   }
 
-  // Extract amount
+  // Extract amount. For each pattern try all matches (not just the first) so a
+  // "Nontaxable amount:0.00 kr." prefix can't poison the well — keep looking
+  // until we find a non-zero value for the same pattern.
   for (const pattern of AMOUNT_PATTERNS) {
-    const match = text.match(pattern)
-    if (match && match[1]) {
-      const parsed = parseAmountString(match[1])
+    const globalPattern = new RegExp(pattern.source, pattern.flags.includes('g') ? pattern.flags : pattern.flags + 'g')
+    let m: RegExpExecArray | null
+    let found: number | null = null
+    while ((m = globalPattern.exec(text)) !== null) {
+      const parsed = parseAmountString(m[1])
       if (parsed !== null && parsed > 0) {
-        result.amount = parsed
+        found = parsed
         break
       }
+    }
+    if (found !== null) {
+      result.amount = found
+      break
     }
   }
 
@@ -255,12 +267,13 @@ export function parseOcrText(text: string): OcrParseResult {
   return result
 }
 
-// Detect VAT rate in text. Handles both Danish orderings: "moms 25%" or "25% moms",
+// Detect VAT rate in text. Handles Danish orderings ("moms 25%" / "25% moms")
+// and English with parenthesized rate ("VAT (25%)" — Billy templates),
 // with optional decimals ("25,00%" / "25.00%").
 function detectVatRate(text: string): number | null {
   const patterns: RegExp[] = [
-    /\b(?:moms|vat|mva|merværdiafgift)[,\s:]+(\d{1,2})(?:[.,]\d{1,2})?\s*%/i,
-    /(\d{1,2})(?:[.,]\d{1,2})?\s*%\s*(?:moms|vat|mva|merværdiafgift)/i,
+    /\b(?:moms|vat|mva|merværdiafgift)\s*\(?\s*(\d{1,2})(?:[.,]\d{1,2})?\s*%/i,
+    /(\d{1,2})(?:[.,]\d{1,2})?\s*%\s*\)?\s*(?:moms|vat|mva|merværdiafgift)/i,
   ]
   for (const p of patterns) {
     const match = text.match(p)
@@ -323,12 +336,15 @@ export function extractVatAmount(text: string): number | null {
   const vatPatterns: RegExp[] = [
     // "Moms, 25 % 209,40" / "Moms 25% 209,40" - rate followed by amount
     new RegExp(String.raw`(?:Moms|VAT|MVA)[,\s]*\d{1,2}\s*%\s*(${AMOUNT_NUM})`, 'i'),
+    // "VAT (25%)62.50" / "VAT (25 %) 62,50" - Billy English template with parenthesized rate
+    new RegExp(String.raw`(?:Moms|VAT|MVA)\s*\(\s*\d{1,2}(?:[.,]\d{1,2})?\s*%\s*\)\s*(?:DKK|kr\.?)?\s*(${AMOUNT_NUM})`, 'i'),
     // "Moms: 209,40" without rate
     new RegExp(String.raw`(?:Moms|VAT|MVA|Merværdiafgift)[:\s]+(?:DKK|kr\.?)?\s*(${AMOUNT_NUM})(?!\s*%)`, 'i'),
     // Rate-prefixed forms: "25%: 209,40"
     new RegExp(String.raw`\b25\s*%[:\s]*(?:DKK|kr\.?)?\s*(${AMOUNT_NUM})`, 'i'),
-    // Suffix form: "209,40 moms" or "60 kr. Moms"
-    new RegExp(String.raw`(${AMOUNT_NUM})\s*(?:kr\.?|DKK)?\s*\b(?:moms|VAT)\b`, 'i'),
+    // Suffix form: "209,40 moms" or "60 kr. Moms" - restrict to same line
+    // (no newlines between number and label) so we don't pick up the line above.
+    new RegExp(String.raw`(${AMOUNT_NUM})[ \t]*(?:kr\.?|DKK)?[ \t]*\b(?:moms|VAT)\b`, 'i'),
   ]
 
   for (const pattern of vatPatterns) {
