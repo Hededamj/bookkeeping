@@ -375,7 +375,9 @@ export default function ReportsPage() {
             <Select
               value="export"
               onValueChange={(value) => {
-                if (value === 'receipts-zip') {
+                if (value === 'revisor-zip') {
+                  window.open(`/api/reports/export-revisor?year=${selectedYear}`, '_blank')
+                } else if (value === 'receipts-zip') {
                   window.open(`/api/reports/export-receipts?year=${selectedYear}`, '_blank')
                 } else if (value !== 'export') {
                   window.open(`/api/reports/export?year=${selectedYear}&type=${value}`, '_blank')
@@ -388,12 +390,12 @@ export default function ReportsPage() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="export" disabled>Vælg rapport...</SelectItem>
-                <SelectItem value="full">Revisorpakke (komplet)</SelectItem>
-                <SelectItem value="summary">Årsregnskab</SelectItem>
-                <SelectItem value="vat">Momsrapport</SelectItem>
-                <SelectItem value="transactions">Transaktioner</SelectItem>
+                <SelectItem value="revisor-zip">📦 Revisorpakke (ZIP — alt samlet)</SelectItem>
+                <SelectItem value="summary">Årsregnskab (CSV)</SelectItem>
+                <SelectItem value="vat">Momsrapport (CSV)</SelectItem>
+                <SelectItem value="transactions">Transaktioner (CSV)</SelectItem>
                 <SelectItem value="receipts">Bilagsliste (CSV)</SelectItem>
-                <SelectItem value="receipts-zip">📁 Bilag som ZIP</SelectItem>
+                <SelectItem value="receipts-zip">📁 Kun bilag som ZIP</SelectItem>
               </SelectContent>
             </Select>
           </div>

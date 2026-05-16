@@ -169,6 +169,13 @@ export default function ReceiptsPage() {
   } | null>(null)
   const [batchUpdating, setBatchUpdating] = useState(false)
 
+  // Match candidates for the open receipt
+  type CandidateTx = { id: string; date: string; description: string; amount: string; score: number; reasons: string[] }
+  type MatchedTx = { id: string; date: string; description: string; amount: string }
+  const [matchData, setMatchData] = useState<{ matched: MatchedTx[]; candidates: CandidateTx[] } | null>(null)
+  const [matchLoading, setMatchLoading] = useState(false)
+  const [matchPending, setMatchPending] = useState<string | null>(null)
+
   // Debounce search
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -191,8 +198,70 @@ export default function ReceiptsPage() {
       setEditDate(selectedReceipt.ocrDate ? selectedReceipt.ocrDate.split('T')[0] : '')
       setNewVendorName('')
       setAmountConverted(false)
+    } else {
+      setMatchData(null)
     }
   }, [selectedReceipt])
+
+  // Fetch match candidates when receipt opens
+  const fetchMatchData = useCallback(async (receiptId: string) => {
+    setMatchLoading(true)
+    try {
+      const res = await fetch(`/api/receipts/${receiptId}/candidates`)
+      if (res.ok) {
+        const data = await res.json()
+        setMatchData({ matched: data.matched, candidates: data.candidates })
+      }
+    } catch (error) {
+      console.error('Failed to fetch match candidates:', error)
+    } finally {
+      setMatchLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (selectedReceipt) {
+      fetchMatchData(selectedReceipt.id)
+    }
+  }, [selectedReceipt, fetchMatchData])
+
+  const matchTransaction = async (txId: string, receiptId: string) => {
+    setMatchPending(txId)
+    try {
+      const res = await fetch(`/api/transactions/${txId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ receiptId, matched: true }),
+      })
+      if (res.ok) {
+        await fetchMatchData(receiptId)
+        fetchReceipts()
+      }
+    } catch (error) {
+      console.error('Match failed:', error)
+    } finally {
+      setMatchPending(null)
+    }
+  }
+
+  const unmatchTransaction = async (txId: string, receiptId: string) => {
+    setMatchPending(txId)
+    try {
+      const res = await fetch(`/api/transactions/${txId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ receiptId: null, matched: false }),
+      })
+      if (res.ok) {
+        await fetchMatchData(receiptId)
+        fetchReceipts()
+      }
+    } catch (error) {
+      console.error('Unmatch failed:', error)
+    } finally {
+      setMatchPending(null)
+    }
+  }
 
   // Convert PDF data URL to blob URL for viewing
   const pdfBlobUrl = useDataUrlToBlob(
@@ -883,14 +952,64 @@ export default function ReceiptsPage() {
                     <p className="mt-1 text-sm text-red-600">{selectedReceipt.ocrError}</p>
                   )}
                 </div>
-                <div>
-                  <p className="text-sm text-muted-foreground">Match Status</p>
-                  {selectedReceipt.transactions.length > 0 ? (
-                    <Badge variant="success">
-                      Matchet med {selectedReceipt.transactions.length} transaktion(er)
-                    </Badge>
+                {/* Match section: shows matched txs or candidate txs to match */}
+                <div className="space-y-2">
+                  <p className="text-sm text-muted-foreground">Matchede transaktioner</p>
+                  {matchLoading && !matchData ? (
+                    <p className="text-xs text-muted-foreground">Indlæser...</p>
+                  ) : matchData && matchData.matched.length > 0 ? (
+                    <div className="space-y-1.5">
+                      {matchData.matched.map((tx) => (
+                        <div key={tx.id} className="flex items-center justify-between gap-2 rounded-md border bg-green-50 dark:bg-green-950/30 px-3 py-2 text-sm">
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate font-medium">{tx.description}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {formatDate(tx.date)} • {formatCurrency(parseFloat(tx.amount))}
+                            </p>
+                          </div>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => unmatchTransaction(tx.id, selectedReceipt.id)}
+                            disabled={matchPending === tx.id}
+                          >
+                            {matchPending === tx.id ? '...' : 'Fjern match'}
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
                   ) : (
-                    <Badge variant="warning">Ikke matchet</Badge>
+                    <>
+                      <p className="text-xs text-muted-foreground">Ingen transaktion matchet endnu. Vælg en kandidat:</p>
+                      {matchData && matchData.candidates.length > 0 ? (
+                        <div className="space-y-1.5 max-h-[280px] overflow-y-auto">
+                          {matchData.candidates.map((tx) => (
+                            <div key={tx.id} className="flex items-center justify-between gap-2 rounded-md border px-3 py-2 text-sm">
+                              <div className="min-w-0 flex-1">
+                                <p className="truncate font-medium">{tx.description}</p>
+                                <p className="text-xs text-muted-foreground">
+                                  {formatDate(tx.date)} • {formatCurrency(parseFloat(tx.amount))}
+                                </p>
+                                {tx.reasons.length > 0 && (
+                                  <p className="text-[10px] text-muted-foreground mt-0.5">
+                                    {tx.reasons.join(' · ')}
+                                  </p>
+                                )}
+                              </div>
+                              <Button
+                                size="sm"
+                                onClick={() => matchTransaction(tx.id, selectedReceipt.id)}
+                                disabled={matchPending === tx.id}
+                              >
+                                {matchPending === tx.id ? '...' : 'Match'}
+                              </Button>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-xs text-muted-foreground">Ingen kandidat-transaktioner fundet (samme beløb ±5% kræves).</p>
+                      )}
+                    </>
                   )}
                 </div>
 
